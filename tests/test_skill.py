@@ -48,15 +48,19 @@ class Recipes(unittest.TestCase):
     def test_new_agents_end_up_unnamed(self):
         self.assertIn("herdr agent rename <pane_id> --clear", TEXT)
 
-    def test_parent_folder_is_not_the_repo(self):
-        # Hermes once put a hv-scratch session in the workspace of an agent running in its parent folder.
-        self.assertIn("starts with `<repo_path>/`", TEXT)
-        self.assertIn("An agent in a folder that contains the repo doesn't count", TEXT)
+    def test_workspace_comes_from_the_script(self):
+        # Matching by hand, Hermes twice put a hv-scratch session in its parent folder's workspace.
+        self.assertIn("scripts/repo_workspace.py <repo_path>", TEXT)
 
     def test_never_steals_focus(self):
         for line in TEXT.splitlines():
             if re.search(r"herdr (workspace|tab) create", line):
                 self.assertIn("--no-focus", line)
+
+    def test_hands_off_the_wait(self):
+        # Waiting in the turn holds the user's voice conversation for up to 9 minutes.
+        self.assertIn("hand the waiting to a background subagent with `delegate_task`", TEXT)
+        self.assertIn("--until working", TEXT)
 
     def test_waits_fit_hermes_terminal_limit(self):
         # Hermes' foreground terminal limit is 600 s.
