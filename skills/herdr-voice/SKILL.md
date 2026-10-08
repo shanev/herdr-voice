@@ -29,8 +29,8 @@ Every command prints JSON; read ids and states from it. For anything not covered
 
 **Start a session** ("new Claude session for hark", "start omp in hark"). It works the same for every agent Herdr supports; `herdr agent start --help` lists the `--kind` values. Match the spoken agent to a kind (Cursor's is `cursor`, Antigravity's is `agy`). A request for a new session always means a new agent, even if one is already running in that repo, idle or not. Reuse an existing agent only when the user asks for it. Do it all without asking, in this order:
 
-1. **Repo:** find its path, e.g. `~/<repo>` or `~/github.com/*/<repo>`. Ask only if more than one matches.
-2. **Workspace:** a session for a repo goes in that repo's workspace. In `herdr agent list`, find an agent whose `cwd` is the repo path or starts with `<repo_path>/`, and use its `workspace_id`. An agent in a folder that contains the repo doesn't count: one in `~/github.com/shanev` isn't in `~/github.com/shanev/hark`. If there's none, use the workspace from `herdr workspace list` whose `label` is the repo name, ignoring case. If neither matches, the repo has no workspace yet: create one in step 3, even when another workspace looks close. Never put a session in another repo's workspace.
+1. **Repo:** find its path, e.g. `~/<repo>` or `~/github.com/*/<repo>`. Ask only if more than one matches, or none does. Never create the repo's folder.
+2. **Workspace:** a session for a repo goes in that repo's workspace. Run `python3 ${HERMES_SKILL_DIR}/scripts/repo_workspace.py <repo_path>` (`scripts/repo_workspace.py` in this skill's folder): it prints the workspace id to use. It matches an agent working in the repo, or a workspace labelled with the repo's name, and never a folder that only contains the repo. If it prints nothing (exit status 1), the repo has no workspace yet: create one in step 3, even when another workspace looks close. Never put a session in another repo's workspace.
 3. **Pane:** always a fresh one, never a pane that already has an agent or shell in it. If the workspace exists, add a tab; if not, create the workspace. Either way, read the new pane's id from `root_pane.pane_id`:
 
    ```bash
@@ -56,13 +56,27 @@ Adding a tab leaves the agents already in that workspace alone: don't read, prom
 
 If `agent start` fails with `agent_not_ready` (blocked during startup), read the screen (`herdr agent read <agent> --source visible`). Many agents ask whether to trust a folder the first time they open it. For a repo the user asked for, pick the option that trusts it with `send-keys`, then `herdr agent wait <agent> --until idle --timeout 30000`. Claude asks "Is this a project you created or one you trust?" and `herdr agent send-keys <agent> Down Enter` answers yes. For any other question, tell the user what it asks.
 
-**Send a task and wait for it** in one command:
+**Send a task** and hand off the waiting, so the user can keep talking while the agent works:
 
-```bash
-herdr agent prompt <agent> "<task>" --wait --until done --until idle --until blocked --timeout 540000
-```
+1. Send it and check it started:
 
-Use the terminal tool with `timeout=560`: its foreground limit is 600 seconds. If it fails with `agent_prompt_stalled`, don't resend yet: read the screen. If your text is sitting in the input box, send `Enter`; if a menu is open, send `Escape` once and check again. Resend only when your text isn't there, so the task never runs twice. Never `sleep` and poll. If the wait times out and the agent is still `working`, tell the user it's still going and what it's doing (one sentence from the latest output), then wait again with `herdr agent wait <agent> --until done --until idle --until blocked --timeout 540000`.
+   ```bash
+   herdr agent prompt <agent> "<task>" --wait --until working --until blocked --until done --until idle --timeout 30000
+   ```
+
+   If it fails with `agent_prompt_stalled`, don't resend yet: read the screen. If your text is sitting in the input box, send `Enter`; if a menu is open, send `Escape` once and check again. Resend only when your text isn't there, so the task never runs twice.
+
+2. If it's already `done` or `idle`, read the result now (below). If it's `blocked`, handle it as below. Otherwise hand the waiting to a background subagent with `delegate_task`; its result comes back to this conversation by itself when the agent finishes. Give it this goal, with `<agent>` filled in:
+
+   > Wait for the Herdr coding agent `<agent>` to finish. Run `herdr agent wait <agent> --until done --until idle --until blocked --timeout 540000` with the terminal tool's `timeout=560`, and run it again while the agent is still `working`. Never `sleep` and poll. Then run `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>`; if it exits with status 3, run `herdr agent read <agent> --source recent-unwrapped --lines 200` and take only the agent's last message. If the agent is `blocked`, read the screen with `herdr agent read <agent> --source visible` and report the question it asks. If the reply says it's still waiting on a command it started in the background, the task isn't finished: run `herdr agent wait <agent> --until working --timeout 540000`, then wait for it to finish again as above. Don't send the agent anything. Report the agent's final state and its last reply or question, word for word.
+
+3. Tell the user it's started and that you'll tell them when it's done ("Claude's on it in asterism 2. I'll tell you when it's done."), then end your turn. Don't run `herdr agent wait`, read the screen or check files yourself after sending a task, even for a task that looks quick: the user is talking to you and hears nothing while you wait.
+
+4. When the subagent's result arrives, report it as in "Reporting back by voice" below, naming the agent the way Herdr's sidebar shows it. If the agent is blocked, tell the user its question in one sentence.
+
+Wait in your own turn instead only when the user asks you to ("do it and wait", "stay on it"): `herdr agent prompt <agent> "<task>" --wait --until done --until idle --until blocked --timeout 540000`, with the terminal tool's `timeout=560` (its foreground limit is 600 seconds). If that wait times out while the agent is still `working`, say it's still going and what it's doing, in one sentence from the latest output, then wait again with `herdr agent wait`.
+
+**Tell me when it's done** ("let me know when asterism 2 finishes"): start the same background subagent for that agent, even one you didn't start, and tell the user you will.
 
 **Read the result:** `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>` (`scripts/last_reply.py` in this skill's folder) prints the agent's last reply from its own session file (Claude Code and Codex), complete however long it is. If it exits with status 3 (another agent kind, or no finished reply), read the screen instead: `herdr agent read <agent> --source recent-unwrapped --lines 200`, and take only the agent's last message after your prompt, not the whole screen. Claude can end its reply while a background command it started is still running; then its `✻ … done` line on screen says a shell is still running: say so, and wait again before reporting the task finished.
 
