@@ -32,8 +32,16 @@ class Frontmatter(unittest.TestCase):
 class HermesScannerFriendly(unittest.TestCase):
     # Hermes' skills guard blocks an install on these tokens even in prose that forbids them.
     def test_no_blocked_tokens(self):
-        for token in ("authorized_keys", "~/.ssh", "printenv", "os.environ"):
-            self.assertNotIn(token, TEXT)
+        for path in [SKILL, *SKILL.parent.glob("scripts/*.py")]:
+            content = path.read_text(encoding="utf-8")
+            for token in ("authorized_keys", "~/.ssh", "printenv", "os.environ"):
+                self.assertNotIn(token, content, path.name)
+
+    def test_scripts_are_referenced(self):
+        # Hermes installs only the scripts/ files SKILL.md names, and only a path that starts a word or
+        # code span counts (tools/skills_hub_models.py _LOCAL_LINK_RE), not ${HERMES_SKILL_DIR}/scripts/...
+        for path in SKILL.parent.glob("scripts/*.py"):
+            self.assertRegex(TEXT, rf"(?:^|[\s`\"'(]){re.escape(f'scripts/{path.name}')}")
 
 
 class Recipes(unittest.TestCase):
