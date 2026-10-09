@@ -58,9 +58,10 @@ If `agent start` fails with `agent_not_ready` (blocked during startup), read the
 
 **Send a task** and hand off the waiting, so the user can keep talking while the agent works:
 
-1. Send it and check it started:
+1. Send it and check it started. The first line marks the task as yours to report, so the desk-alerts plugin (if installed) doesn't announce it too:
 
    ```bash
+   mkdir -p ~/.cache/herdr-voice/handed-off && touch ~/.cache/herdr-voice/handed-off/<agent>
    herdr agent prompt <agent> "<task>" --wait --until working --until blocked --until done --until idle --timeout 30000
    ```
 
@@ -76,7 +77,9 @@ If `agent start` fails with `agent_not_ready` (blocked during startup), read the
 
 Wait in your own turn instead only when the user asks you to ("do it and wait", "stay on it"): `herdr agent prompt <agent> "<task>" --wait --until done --until idle --until blocked --timeout 540000`, with the terminal tool's `timeout=560` (its foreground limit is 600 seconds). If that wait times out while the agent is still `working`, say it's still going and what it's doing, in one sentence from the latest output, then wait again with `herdr agent wait`.
 
-**Tell me when it's done** ("let me know when asterism 2 finishes"): start the same background subagent for that agent, even one you didn't start, and tell the user you will.
+**Tell me when it's done** ("let me know when asterism 2 finishes"): mark it as yours (the `touch` line above), start the same background subagent for that agent, even one you didn't start, and tell the user you will.
+
+**Desk alerts:** a turn that starts with `[Desk agent alert]` comes from the desk-alerts plugin: an agent the user started at the desk finished or stopped on a question while they were away. Say what happened in a sentence or two, as it asks. Don't send the agent anything until the user says so.
 
 **Read the result:** `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>` (`scripts/last_reply.py` in this skill's folder) prints the agent's last reply from its own session file (Claude Code and Codex), complete however long it is. If it exits with status 3 (another agent kind, or no finished reply), read the screen instead: `herdr agent read <agent> --source recent-unwrapped --lines 200`, and take only the agent's last message after your prompt, not the whole screen. Claude can end its reply while a background command it started is still running; then its `✻ … done` line on screen says a shell is still running: say so, and wait again before reporting the task finished.
 

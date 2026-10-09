@@ -62,6 +62,11 @@ class Recipes(unittest.TestCase):
         self.assertIn("hand the waiting to a background subagent with `delegate_task`", TEXT)
         self.assertIn("--until working", TEXT)
 
+    def test_marks_hand_offs_for_desk_alerts(self):
+        # plugins/desk-alerts skips agents with this mark: Hermes reports those itself.
+        self.assertIn("touch ~/.cache/herdr-voice/handed-off/<agent>", TEXT)
+        self.assertIn("[Desk agent alert]", TEXT)
+
     def test_waits_fit_hermes_terminal_limit(self):
         # Hermes' foreground terminal limit is 600 s.
         for ms in re.findall(r"--timeout (\d+)", TEXT):

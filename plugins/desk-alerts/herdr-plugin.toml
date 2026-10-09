@@ -1,0 +1,10 @@
+id = "herdr-voice.desk-alerts"
+name = "Desk alerts"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Tell Hermes when an agent finishes or stops on a question while you're away."
+platforms = ["macos", "linux"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "desk_alert.py"]
