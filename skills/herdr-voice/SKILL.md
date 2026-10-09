@@ -25,7 +25,7 @@ Read requests generously: "herder", "hurdle", "burger" mean Herdr; "harp", "hear
 
 Every command prints JSON; read ids and states from it. For anything not covered here, print a command group's usage by running it without a subcommand (`herdr agent`, `herdr workspace`, `herdr tab`, `herdr pane`). Never run bare `herdr`: it opens the interactive UI.
 
-**What's running:** `herdr agent list`. When the user says "sessions" they mean these coding agents, not Herdr's server sessions (`herdr session list` is almost never what they want). Speak of each agent the way Herdr's sidebar shows it: workspace label and tab label ("asterism 2", labels from `herdr workspace list` and `herdr tab list --workspace <id>`), then its kind and state: idle or done means waiting for input, working, or blocked. Match the user's "the asterism 2 agent" or "the Claude in hark" back to a `pane_id` the same way.
+**What's running:** `herdr agent list`. When the user says "sessions" they mean these coding agents, not Herdr's server sessions (`herdr session list` is almost never what they want). Speak of each agent by its `name` when it has one ("apple-models in hark"); otherwise the way Herdr's sidebar shows it: workspace label and tab label ("asterism 2", labels from `herdr workspace list` and `herdr tab list --workspace <id>`). Then give its kind and state: idle or done means waiting for input, working, or blocked. To match the user's words back to a `pane_id`, try the names first ("the apple models agent" is `apple-models`, spoken with spaces for dashes), and fall back to workspace and tab ("the asterism 2 agent", "the Claude in hark") only for agents started at the desk that never got a name.
 
 **Start a session** ("new Claude session for hark", "start omp in hark"). It works the same for every agent Herdr supports; `herdr agent start --help` lists the `--kind` values. Match the spoken agent to a kind (Cursor's is `cursor`, Antigravity's is `agy`). A request for a new session always means a new agent, even if one is already running in that repo, idle or not. Reuse an existing agent only when the user asks for it. Do it all without asking, in this order:
 
@@ -38,19 +38,19 @@ Every command prints JSON; read ids and states from it. For anything not covered
    herdr workspace create --cwd <repo_path> --label <repo> --no-focus
    ```
 
-4. **Temporary name:** `agent start` requires a name, so use `new-<pane>`: the `pane_id` in lowercase with `:` as `-` (`w1P:p8` → `new-w1p-p8`); pane ids are never reused, so it's always free. Herdr's sidebar shows a named agent's name under "asterism · 2" instead of its kind, so step 6 clears it.
+4. **Name:** derive a permanent name from the task, a short phrase the user would naturally say to refer to it, taken from their request: kebab-case, lowercase, no spaces, under about five words. Starting Claude on the Apple Foundation Models agent loops in hark gives `hark-apple-models` or just `apple-models`. If the user asks for a particular name, use theirs. Only when the request gives no usable phrase, or you're starting the session with an empty prompt, use `new-<pane>`: the `pane_id` in lowercase with `:` as `-` (`w1P:p8` → `new-w1p-p8`); pane ids are never reused, so it's always free.
 5. **Start:**
 
    ```bash
-   herdr agent start new-<pane> --kind <kind> --pane <pane_id> --timeout 60000 -- <prompts-off flag>
+   herdr agent start <name> --kind <kind> --pane <pane_id> --timeout 60000 -- <prompts-off flag>
    # With permission prompts on, or for an agent without such a flag, leave out everything from `--` on.
    ```
 
    Prompts-off flags: claude `--dangerously-skip-permissions`, codex `--yolo`, omp `--auto-approve`, grok `--always-approve`, hermes `--yolo`, opencode `--auto`, cursor `--force`; pi has no approval prompts, so it needs none. For any other kind, read its executable's `--help` once and use the flag that auto-approves all tool calls (names like `--yolo`, `--dangerously-…`, `--always-approve`, `--auto-approve`). If there's no such flag, start it without one and tell the user it may stop to ask.
 
-6. **Clear the name** once it's ready (after any folder-trust prompt below): `herdr agent rename <pane_id> --clear`. From then on use the `pane_id`. Keep a name only when the user asks for one; then use theirs instead of `new-…` and don't clear it.
+6. **Keep the name:** never clear it. Herdr's sidebar shows it under "asterism · 2" instead of the agent's kind, and from then on it's how you and the user refer to the agent.
 
-Adding a tab leaves the agents already in that workspace alone: don't read, prompt, interrupt, or close them while starting the new one. Tell the user where the new agent is the way the sidebar shows it ("Claude is up in asterism 2") and whether that's an existing workspace or a new one.
+Adding a tab leaves the agents already in that workspace alone: don't read, prompt, interrupt, or close them while starting the new one. Tell the user where the new agent is by its name and workspace ("apple-models is up in hark") and whether that's an existing workspace or a new one.
 
 **Permission prompts:** the first time you start a session for this user, check your memory for their choice. If there's none, ask once: "Should coding sessions run with permission prompts off, so they never stop to ask?" Save the answer to memory and follow it from then on. With prompts on, a session that stops to ask shows as `blocked` (see below).
 

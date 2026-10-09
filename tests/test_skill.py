@@ -45,8 +45,12 @@ class HermesScannerFriendly(unittest.TestCase):
 
 
 class Recipes(unittest.TestCase):
-    def test_new_agents_end_up_unnamed(self):
-        self.assertIn("herdr agent rename <pane_id> --clear", TEXT)
+    def test_new_agents_keep_a_task_name(self):
+        # Voice users address agents by what they're doing ("apple-models"), not by tab number.
+        self.assertIn("herdr agent start <name>", TEXT)
+        self.assertNotIn("--clear", TEXT)
+        # new-<pane> is only the fallback when the request gives no usable phrase.
+        self.assertIn("new-<pane>", TEXT)
 
     def test_workspace_comes_from_the_script(self):
         # Matching by hand, Hermes twice put a hv-scratch session in its parent folder's workspace.
