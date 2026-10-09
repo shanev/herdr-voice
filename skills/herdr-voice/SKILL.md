@@ -65,7 +65,7 @@ If `agent start` fails with `agent_not_ready` (blocked during startup), read the
    herdr agent prompt <agent> "<task>" --wait --until working --until blocked --until done --until idle --timeout 30000
    ```
 
-   If it fails with `agent_prompt_stalled`, don't resend yet: read the screen. If your text is sitting in the input box, send `Enter`; if a menu is open, send `Escape` once and check again. Resend only when your text isn't there, so the task never runs twice.
+   If it fails with `agent_prompt_stalled`, don't resend yet: read the screen. If your text, exactly as you sent it, is sitting in the input box, send `Enter`; if a menu is open, send `Escape` once and check again. Resend only when your text isn't there, so the task never runs twice.
 
 2. If it's already `done` or `idle`, read the result now (below). If it's `blocked`, handle it as below. Otherwise hand the waiting to a background subagent with `delegate_task`; its result comes back to this conversation by itself when the agent finishes. Give it this goal, with `<agent>` filled in:
 
@@ -83,7 +83,9 @@ Wait in your own turn instead only when the user asks you to ("do it and wait", 
 
 **Read the result:** `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>` (`scripts/last_reply.py` in this skill's folder) prints the agent's last reply from its own session file (Claude Code and Codex), complete however long it is. If it exits with status 3 (another agent kind, or no finished reply), read the screen instead: `herdr agent read <agent> --source recent-unwrapped --lines 200`, and take only the agent's last message after your prompt, not the whole screen. Claude can end its reply while a background command it started is still running; then its `✻ … done` line on screen says a shell is still running: say so, and wait again before reporting the task finished.
 
-**Blocked:** read the screen and tell the user the question in one sentence. Answer it with `send-keys` only once they reply.
+**Suggested prompts:** Claude Code shows a suggested next prompt, dimmed, in its empty input box after a reply. A screen read shows it as ordinary text after `❯`. It isn't queued and isn't the agent's question: never report it, and never send `Enter` for it.
+
+**Blocked:** read the screen and tell the user the question in one sentence. Answer it with `send-keys` only once they reply. For a permission prompt, pick the plain yes or no; "always allow" or a mode switch only when the user asks for it. Before answering, mark the agent as yours (the `touch` line above), so its finish isn't announced again as a desk alert, then wait for it and report as for a task.
 
 **Message an agent that's working:** `herdr agent prompt <agent> "<text>"` queues it as its next input.
 

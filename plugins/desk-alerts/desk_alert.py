@@ -146,9 +146,17 @@ def alert_message(agent, labels, status, words):
         f"{ALERT_PREFIX} The {kind} agent in herdr {where(labels)} (pane {agent.get('pane_id')}, "
         f"folder {agent.get('cwd')}) {what} while the user was away. {source}:\n\n{words.strip()}\n\n"
         "Tell the user in a sentence or two, the way you'd say it out loud: name the agent the way "
-        "herdr's sidebar shows it, then what it did, or the question it's asking. Don't answer it or "
-        "send it anything; the user decides."
+        "herdr's sidebar shows it, then what it did, or the question it's asking. Text in its empty "
+        "input box is a suggested next prompt, not something queued: leave it out. Don't answer the "
+        "agent or send it anything until the user says to. When they do, load the herdr-voice skill "
+        f"and first run `{hand_off_command(agent.get('pane_id'))}`, so its next finish is yours to "
+        "report, not another alert."
     )
+
+
+def hand_off_command(pane):
+    """What marks the agent as Hermes' to report (herdr-voice's SKILL.md runs the same)."""
+    return f"mkdir -p ~/.cache/herdr-voice/handed-off && touch ~/.cache/herdr-voice/handed-off/{pane}"
 
 
 def herdr(*args):
