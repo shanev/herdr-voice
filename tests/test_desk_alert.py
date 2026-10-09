@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import tempfile
 import time
@@ -131,6 +132,37 @@ class Settling(unittest.TestCase):
         # done, working, done again inside the settle time: the first done's alert is dropped.
         self.settle({"agent": "claude", "pane_id": "w1:p1", "agent_status": "done"}, newer_event=True)
         self.assertEqual(self.delivered, [])
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+class PermissionPrompts(unittest.TestCase):
+    def test_a_bash_command(self):
+        self.assertEqual(desk_alert.permission_prompt((FIXTURES / "claude_bash_prompt.txt").read_text(encoding="utf-8")), {
+            "title": "Bash command", "detail": "Write current date to stamp.txt", "command": "date > stamp.txt",
+            "question": "Do you want to proceed?", "yes": 1, "no": 4})
+
+    def test_a_new_file(self):
+        self.assertEqual(desk_alert.permission_prompt((FIXTURES / "claude_write_prompt.txt").read_text(encoding="utf-8")), {
+            "title": "Create file", "detail": "notes.md", "command": "hello from the desk",
+            "question": "Do you want to create notes.md?", "yes": 1, "no": 3})
+
+    def test_a_question_in_prose_isnt_a_prompt(self):
+        self.assertIsNone(desk_alert.permission_prompt("⏺ Which branch should I use, main or dev?\n\n❯ \n"))
+
+    def test_the_alert_carries_it_as_data(self):
+        screen = (FIXTURES / "claude_bash_prompt.txt").read_text(encoding="utf-8")
+        agent = {"agent": "claude", "pane_id": "w4:p1", "cwd": "/src/x"}
+        message = desk_alert.alert_message(agent, ("asterism", "2"), "blocked", screen)
+        line = next(line for line in message.splitlines() if line.startswith(desk_alert.APPROVAL_PREFIX))
+        data = json.loads(line.removeprefix(desk_alert.APPROVAL_PREFIX))
+        self.assertEqual((data["pane"], data["agent"], data["workspace"], data["tab"], data["command"], data["yes"], data["no"]),
+                         ("w4:p1", "claude", "asterism", "2", "date > stamp.txt", 1, 4))
+        # Data only. With the answer's wording in it, Hermes approved the prompt by itself, live.
+        self.assertEqual(set(data), {"pane", "agent", "workspace", "tab", "title", "detail", "command", "question", "yes", "no"})
+        # A finished agent's reply is never read as a prompt.
+        self.assertNotIn(desk_alert.APPROVAL_PREFIX, desk_alert.alert_message(agent, ("asterism", "2"), "done", screen))
 
 
 class Message(unittest.TestCase):
