@@ -20,11 +20,19 @@ Run coding agents in [herdr](https://herdr.dev) by talking to [Hermes](https://h
 
 > Where did we do the swipe fix?
 
-A new session is always a new agent. It opens as a tab in the repo's herdr workspace, or in a new workspace if the repo doesn't have one yet. It gets a permanent name taken from the task, like `apple-models`, which herdr's sidebar shows in place of the agent's kind, and that's how Hermes refers to it. Agents you start yourself at the desk stay unnamed, so Hermes calls them by workspace and tab, like `hark · 2`. It never touches the agents already running there.
+> Have Codex review it.
+
+> Merge it once CI passes.
+
+> Show me that one.
+
+A new session is always a new agent. It opens as a tab in the repo's herdr workspace, or in a new workspace if the repo doesn't have one yet. It gets a permanent name taken from the task, like `apple-models`, which herdr's sidebar shows in place of the agent's kind, and that's how Hermes refers to it. Agents you start yourself at the desk stay unnamed, so Hermes calls them by workspace and tab, like `hark · 2`. It never touches the agents already running there. When another agent is already working in the repo's checkout, or you name an issue or branch, the new session gets its own git worktree instead, branched from the latest default branch, so agents don't switch branches or reset files under each other. Hermes offers to remove a worktree once its PR is merged, and never removes one on its own.
 
 It works with every agent herdr can start: Claude Code, Codex, omp, Grok, pi, OpenCode, Cursor, Gemini, Amp and the rest. Hermes asks once whether sessions should run with permission prompts off and remembers your answer. For agents the skill doesn't list, it finds the flag in the agent's `--help`.
 
 Hermes doesn't sit waiting while an agent works. It hands the wait to a background subagent, so you can keep talking, and tells you when the agent is done or stuck. Ask it to wait instead and it will. When one request starts several agents, you get one report once they're all done, not one per agent. A done report mentions what the task cost and how full the agent's context is, when the agent's status line shows them.
+
+"Have Codex review it" starts a second agent on the PR's branch to review it without changing anything, and tells you the verdict and anything blocking; "send that to the Claude" passes the findings back to the agent that wrote it. "Merge it once CI passes" waits for the checks and squash-merges, or tells you which check failed. The first time, Hermes asks whether to merge like that from then on without checking with you. "Show me that one" switches Herdr's window to the agent you were just talking about.
 
 "What's waiting on me?" goes through every agent and tells you which are still working, which have a question for you (and what it is), and which finished with a result you haven't heard yet. "Where did we do the swipe fix?" searches the agents' transcripts and tells you which one worked on it, without sending it anything.
 
@@ -56,7 +64,7 @@ It runs on herdr's `pane.agent_status_changed` event, so nothing new keeps runni
 
 ## Why Hermes runs outside herdr
 
-Hermes' gateway usually runs as a background service, not in a herdr pane. herdr's own skill stops when `HERDR_ENV` isn't set, so it refuses to work from there. This skill controls herdr from outside through its socket. It addresses agents by pane, never by focus, and never attaches, focuses or closes anything it didn't start. If both skills are installed, Hermes may load herdr's by name; Hark's instructions point it at this one.
+Hermes' gateway usually runs as a background service, not in a herdr pane. herdr's own skill stops when `HERDR_ENV` isn't set, so it refuses to work from there. This skill controls herdr from outside through its socket. It addresses agents by pane, never by focus, and never attaches, focuses or closes anything it didn't start, except that it switches to an agent when you ask to see it. If both skills are installed, Hermes may load herdr's by name; Hark's instructions point it at this one.
 
 ## Writing the description
 

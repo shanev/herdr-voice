@@ -58,7 +58,7 @@ class Recipes(unittest.TestCase):
 
     def test_never_steals_focus(self):
         for line in TEXT.splitlines():
-            if re.search(r"herdr (workspace|tab) create", line):
+            if re.search(r"herdr (workspace|tab|worktree) (create|open)", line):
                 self.assertIn("--no-focus", line)
 
     def test_hands_off_the_wait(self):
@@ -113,6 +113,25 @@ class Recipes(unittest.TestCase):
             line = next(line for line in section.splitlines() if phrase in line)
             self.assertIn(recipe, line)
             self.assertIn(recipe.strip("*"), TEXT.replace(section, ""))
+
+    def test_worktree_when_the_checkout_is_busy(self):
+        self.assertIn("scripts/repo_workspace.py --busy <repo_path>", TEXT)
+        self.assertIn("herdr worktree create --cwd <repo_path>", TEXT)
+
+    def test_never_removes_a_worktree_unasked(self):
+        self.assertIn("never remove a worktree on your own", TEXT)
+        self.assertIn("pass `--force` only if they say to throw them away", TEXT)
+
+    def test_merges_only_on_green(self):
+        self.assertIn("gh pr checks <number> --watch --fail-fast", TEXT)
+        self.assertIn("gh pr merge <number> --squash", TEXT)
+        self.assertIn("check your memory for the user's merge choice", TEXT)
+
+    def test_focus_only_when_asked(self):
+        show = next(line for line in TEXT.splitlines() if line.startswith("**Show me an agent**"))
+        self.assertIn("herdr agent focus <agent>", show)
+        self.assertIn("only when the user asks", show)
+        self.assertEqual(TEXT.count("herdr agent focus"), 1)
 
     def test_waits_fit_hermes_terminal_limit(self):
         # Hermes' foreground terminal limit is 600 s.

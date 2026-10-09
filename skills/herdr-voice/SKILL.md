@@ -12,7 +12,7 @@ The user talks to you through a voice app and is usually away from the screen. Y
 Don't check `HERDR_ENV` or ask to be moved into a Herdr pane: the user set Hermes up to control Herdr from outside. Stay out of their way instead:
 
 - Address an agent by its `pane_id` from `herdr agent list` (`w1P:p8`), or by its `name` if it has one; never by focus. `<agent>` below means either. Pass `--no-focus` when creating workspaces or tabs.
-- Never run `focus`, `attach`, bare `herdr`, `herdr server stop`, or close a workspace or agent you didn't start, unless the user asks.
+- Never run `focus`, `attach`, bare `herdr`, `herdr server stop`, or close a workspace or agent you didn't start, unless the user asks. Asking to see an agent counts: see **Show me an agent**.
 - Use the default session. Don't pass `--session`.
 
 For interactive coding agent sessions on this machine (Claude Code, Codex, or any other agent Herdr supports), use Herdr, not tmux, unless the user asks for tmux. Herdr is the user's tool for these.
@@ -30,6 +30,9 @@ Short spoken phrases map to recipes below. Match them generously: speech-to-text
 - "where did we do X", "which session did X": **Where did we do this**.
 - "nudge X": send X `herdr agent prompt <agent> "Continue with your current task."` and hand off the waiting as in **Send a task**.
 - "stop X": **Stop**.
+- "show me X", "switch to X", "put X on screen": **Show me an agent**.
+- "have Codex review it", "get a review": **Review a PR**.
+- "merge it", "merge it once CI passes": **Merge a PR**.
 
 X is an agent, matched as in **What's running**.
 
@@ -52,12 +55,13 @@ Read each idle or done agent's last reply with `python3 ${HERMES_SKILL_DIR}/scri
 **Start a session** ("new Claude session for hark", "start omp in hark"). It works the same for every agent Herdr supports; `herdr agent start --help` lists the `--kind` values. Match the spoken agent to a kind (Cursor's is `cursor`, Antigravity's is `agy`). A request for a new session always means a new agent, even if one is already running in that repo, idle or not. Reuse an existing agent only when the user asks for it. Do it all without asking, in this order:
 
 1. **Repo:** find its path, e.g. `~/<repo>` or `~/github.com/*/<repo>`. Ask only if more than one matches, or none does. Never create the repo's folder.
-2. **Workspace:** a session for a repo goes in that repo's workspace. Run `python3 ${HERMES_SKILL_DIR}/scripts/repo_workspace.py <repo_path>` (`scripts/repo_workspace.py` in this skill's folder): it prints the workspace id to use. It matches an agent working in the repo, or a workspace labelled with the repo's name, and never a folder that only contains the repo. If it prints nothing (exit status 1), the repo has no workspace yet: create one in step 3, even when another workspace looks close. Never put a session in another repo's workspace.
-3. **Pane:** always a fresh one, never a pane that already has an agent or shell in it. If the workspace exists, add a tab; if not, create the workspace. Either way, read the new pane's id from `root_pane.pane_id`:
+2. **Workspace:** first decide whether the session gets its own worktree (see **Worktrees** below); if it does, skip to step 3. Otherwise a session for a repo goes in that repo's workspace. Run `python3 ${HERMES_SKILL_DIR}/scripts/repo_workspace.py <repo_path>` (`scripts/repo_workspace.py` in this skill's folder): it prints the workspace id to use. It matches an agent working in the repo, or a workspace labelled with the repo's name, and never a folder that only contains the repo. If it prints nothing (exit status 1), the repo has no workspace yet: create one in step 3, even when another workspace looks close. Never put a session in another repo's workspace.
+3. **Pane:** always a fresh one, never a pane that already has an agent or shell in it. If the workspace exists, add a tab; if not, create the workspace. For a worktree, create the worktree: it opens as its own workspace, labelled with the branch. Either way, read the new pane's id from `root_pane.pane_id`:
 
    ```bash
    herdr tab create --workspace <workspace_id> --cwd <repo_path> --no-focus
    herdr workspace create --cwd <repo_path> --label <repo> --no-focus
+   herdr worktree create --cwd <repo_path> --branch <branch> --base <base> --no-focus
    ```
 
 4. **Name:** derive a permanent name from the task, a short phrase the user would naturally say to refer to it, taken from their request: kebab-case, lowercase, no spaces, under about five words. Starting Claude on the Apple Foundation Models agent loops in hark gives `hark-apple-models` or just `apple-models`. If the user asks for a particular name, use theirs. Only when the request gives no usable phrase, or you're starting the session with an empty prompt, use `new-<pane>`: the `pane_id` in lowercase with `:` as `-` (`w1P:p8` → `new-w1p-p8`); pane ids are never reused, so it's always free.
@@ -73,6 +77,14 @@ Read each idle or done agent's last reply with `python3 ${HERMES_SKILL_DIR}/scri
 6. **Keep the name:** never clear it. Herdr's sidebar shows it under "asterism · 2" instead of the agent's kind, and from then on it's how you and the user refer to the agent.
 
 Adding a tab leaves the agents already in that workspace alone: don't read, prompt, interrupt, or close them while starting the new one. Tell the user where the new agent is by its name and workspace ("apple-models is up in hark") and whether that's an existing workspace or a new one.
+
+**Worktrees:** agents sharing one checkout get in each other's way: one switches branches or resets files under another. Give a new session its own worktree when another agent is already working in the repo's checkout (`python3 ${HERMES_SKILL_DIR}/scripts/repo_workspace.py --busy <repo_path>` prints their pane ids and exits 0; it exits 1 when there are none), or when the user names an issue or a branch for it. Otherwise use the repo's own checkout as above.
+
+- **Branch:** the one the user names; for an issue, `<number>-<short-title>` from `gh issue view <number>` (`24-swipe-crash`); otherwise the session's name from step 4, so derive that first.
+- **Base:** the remote's default branch, so the session starts from fresh code rather than whatever the checkout has: `git -C <repo_path> fetch -q origin`, then `git -C <repo_path> symbolic-ref --short refs/remotes/origin/HEAD` gives it (`origin/main`). If that fails, leave out `--base`: it then branches from the checkout's current commit. An existing branch is checked out as it is, and `--base` is ignored.
+- If `worktree create` fails because the branch is already checked out elsewhere, tell the user where instead of picking another branch.
+- When you tell the user where it is, say it's in its own worktree ("apple-models is up in its own worktree of hark"). If `git -C <repo_path> status --porcelain` prints anything, add that the worktree doesn't have the uncommitted changes in the main checkout. If the checkout has installed dependencies (`node_modules`, `.venv`, `target`, `.build`), add that the first build there may be slow while it installs them.
+- **Cleanup:** never remove a worktree on your own. Once its PR is merged, offer once to clean it up, and only on a yes run `herdr worktree remove --workspace <workspace_id>`: it closes that workspace with any agents in it and deletes the folder, and keeps the branch. If it fails with `dirty_worktree_requires_force`, tell the user it has uncommitted changes, and pass `--force` only if they say to throw them away.
 
 **Permission prompts:** the first time you start a session for this user, check your memory for their choice. If there's none, ask once: "Should coding sessions run with permission prompts off, so they never stop to ask?" Save the answer to memory and follow it from then on. With prompts on, a session that stops to ask shows as `blocked` (see below).
 
@@ -102,6 +114,22 @@ Wait in your own turn instead only when the user asks you to ("do it and wait", 
 **Tell me when it's done** ("let me know when asterism 2 finishes"): mark it as yours (the `touch` line above), start the same background subagent for that agent, even one you didn't start, and tell the user you will.
 
 **Several agents at once:** when one request starts or prompts several agents, do step 1 of **Send a task** for each, then call `delegate_task` once per agent with the goal above, plus once more for the whole batch with this goal: wait for each of `<agent>`, `<agent>`, … in turn as above, and return all their final states and replies together. Say the hand-off sentence once, for the whole batch. Results come back as separate messages, one per subagent, and the per-agent ones race the batch one. On each arrival, check whether you now have a result for every agent in the batch: if not, end your turn without saying anything; if so, report them all once, in one reply. Results that arrive after you've reported the set are duplicates: end your turn without speaking.
+
+**Review a PR** ("have Codex review it"):
+
+1. **PR:** the number the user says; else the one the conversation was last about (an agent that opened one usually gives its URL); else the PR for the branch that agent is on, from `gh pr view --json number,url,headRefName` run in its `cwd`. Ask only if none of those finds one. The agent that wrote it is the author.
+2. **Reviewer:** start a new agent as in **Start a session**, of the kind the user names (Claude if they don't), named `pr-<number>-review`. It only reads, so it goes in a new tab of the workspace whose checkout is on the PR's branch, usually the author's, even when the author is still in it: add the tab as in step 3, with `--cwd` set to that checkout. If no checkout has the branch, create a worktree for it (`--branch <headRefName>`).
+3. **Task:** send it this, and hand off the waiting, as in **Send a task**: "Review PR #<number> (`gh pr view <number>`, `gh pr diff <number>`). Don't edit files, commit, push, or comment on the PR. List the problems you find by severity (blocking, should fix, nit), each with its file and line and one sentence on why. End with a one-line verdict."
+4. **Report** the verdict and the blocking problems in two to four sentences, and offer to put the full list on screen (**Show me an agent**, on the reviewer).
+5. **"Send that to the Claude":** read the reviewer's reply with `scripts/last_reply.py` and pass it to the author as a task, as in **Send a task**: "A reviewer went over PR #<number>. Fix what you agree with and push, then say what you left alone and why:" followed by the reply, word for word.
+
+**Merge a PR** ("merge it once CI passes"): find the PR as in **Review a PR**. The first time, check your memory for the user's merge choice. If there's none, ask once: "I'll squash-merge it once the checks pass. Should I merge PRs like that from now on without checking with you first?" Save the answer to memory. If they want to be asked, confirm every merge before handing it off. Then hand off the wait with `delegate_task`, giving it this goal with `<number>` and `<repo_path>` filled in:
+
+> Merge PR #<number> once its checks pass. In `<repo_path>`, run `gh pr checks <number> --watch --fail-fast --interval 30` with the terminal tool's `timeout=560`, and run it again while checks are still pending. Never `sleep` and poll. If every check passed, run `gh pr merge <number> --squash` and report whether it merged. If any check failed, or no checks are reported, don't merge: report which checks failed, from `gh pr checks <number>`, or that there were none. Report any error from `gh` word for word.
+
+Tell the user you'll merge it when the checks pass and let them know. When the result arrives, say whether it merged, or which check failed. If it merged from a worktree, offer the cleanup in **Worktrees**.
+
+**Show me an agent** ("show me that one", "switch to the asterism 2 Claude"): `herdr agent focus <agent>`. Run it only when the user asks to see or switch to an agent, or says yes to an offer to put something on screen, never as a side effect of anything else. "That one" or "it" is the agent the conversation was last about. Focus belongs to Herdr's session, so every open Herdr window switches to it, and Herdr can't tell you whether one is open. Say "It's on screen in Herdr" with the agent's name. If the user says nothing changed, no Herdr window is open on the Mac: it'll show that agent when they open one.
 
 **Desk alerts:** a turn that starts with `[Desk agent alert]` comes from the desk-alerts plugin: an agent the user started at the desk finished or stopped on a question while they were away. Say what happened in a sentence or two, as it asks. Don't send the agent anything until the user says so.
 
