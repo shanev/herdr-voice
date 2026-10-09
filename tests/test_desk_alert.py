@@ -147,7 +147,13 @@ class Message(unittest.TestCase):
         message = desk_alert.alert_message(self.agent, ("asterism", None), "blocked", "Allow npm publish? 1. Yes 2. No")
         self.assertIn('workspace "asterism" (pane', message)
         self.assertIn("waiting for an answer", message)
-        self.assertIn("Don't answer it", message)
+        self.assertIn("Don't answer the agent", message)
+        # Answering through Hermes makes the agent's next finish Hermes' to report.
+        self.assertIn("touch ~/.cache/herdr-voice/handed-off/w1:p8", message)
+
+    def test_marks_like_the_skill(self):
+        skill = SKILL.read_text(encoding="utf-8")
+        self.assertIn(desk_alert.hand_off_command("<agent>"), skill)
 
 
 if __name__ == "__main__":

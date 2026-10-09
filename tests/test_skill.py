@@ -66,6 +66,9 @@ class Recipes(unittest.TestCase):
         # plugins/desk-alerts skips agents with this mark: Hermes reports those itself.
         self.assertIn("touch ~/.cache/herdr-voice/handed-off/<agent>", TEXT)
         self.assertIn("[Desk agent alert]", TEXT)
+        # Answering a stuck agent makes its finish Hermes' to report too.
+        blocked = next(line for line in TEXT.splitlines() if line.startswith("**Blocked:**"))
+        self.assertIn("the `touch` line above", blocked)
 
     def test_waits_fit_hermes_terminal_limit(self):
         # Hermes' foreground terminal limit is 600 s.
