@@ -7,13 +7,36 @@ TEXT = SKILL.read_text(encoding="utf-8")
 
 
 def frontmatter():
+    # The block-style YAML subset SKILL.md uses: nested mappings, "- item" lists, quoted scalars.
     match = re.match(r"^---\n(.*?)\n---\n", TEXT, re.S)
     assert match, "SKILL.md must start with YAML frontmatter"
+    lines = [line for line in match.group(1).splitlines() if line.strip()]
+    value, rest = _block(lines, 0)
+    assert not rest, rest
+    return value
+
+
+def _block(lines, indent):
+    if lines[0].lstrip().startswith("- "):
+        items = []
+        while lines and lines[0].startswith(" " * indent + "- "):
+            items.append(_scalar(lines.pop(0).strip()[2:]))
+        return items, lines
     fields = {}
-    for line in match.group(1).splitlines():
-        key, _, value = line.partition(":")
-        fields[key.strip()] = value.strip().strip('"')
-    return fields
+    while lines and len(lines[0]) - len(lines[0].lstrip()) == indent:
+        key, _, value = lines.pop(0).strip().partition(":")
+        if value.strip():
+            fields[key] = _scalar(value.strip())
+        else:
+            child = len(lines[0]) - len(lines[0].lstrip())
+            fields[key], lines = _block(lines, child)
+    return fields, lines
+
+
+def _scalar(value):
+    if value in ("true", "false"):
+        return value == "true"
+    return value[1:-1] if value[:1] == value[-1:] == '"' else value
 
 
 class Frontmatter(unittest.TestCase):
@@ -27,6 +50,21 @@ class Frontmatter(unittest.TestCase):
         self.assertLessEqual(len(description), 60, description)
         for word in ("Herdr", "Claude", "Codex", "any coding agent"):
             self.assertIn(word, description)
+
+    def test_hermes_reads_the_whole_frontmatter(self):
+        # Hermes' skill scan parses only the first 4000 characters (tools/skills_tool.py).
+        self.assertLess(TEXT.index("\n---\n", 3), 4000)
+
+    def test_describes_itself_to_hark(self):
+        # Hark's voice skill catalog and app read metadata.hark (heyhark.app/voice-skills.json).
+        hark = frontmatter()["metadata"]["hark"]
+        self.assertIs(hark["voice"], True)
+        self.assertLessEqual(len(hark["summary"]), 120)
+        self.assertEqual(hark["requires"], {"command": "herdr"})
+        self.assertLessEqual(len(hark["phrases"]), 6)
+        self.assertTrue(all(hark["phrases"]))
+        self.assertLessEqual(len(hark["routing"]), 300)
+        self.assertIn("herdr-voice", hark["routing"])
 
 
 class HermesScannerFriendly(unittest.TestCase):

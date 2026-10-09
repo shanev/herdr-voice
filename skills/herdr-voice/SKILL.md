@@ -1,6 +1,19 @@
 ---
 name: herdr-voice
 description: "Claude Code, Codex, omp, any coding agent: Herdr, not tmux"
+metadata:
+  hark:
+    voice: true
+    summary: "Start, check and steer Claude Code, Codex and other coding agents in Herdr."
+    requires:
+      command: herdr
+    phrases:
+      - "new Claude session for hark"
+      - "what's waiting on me?"
+      - "tell the hark Claude to fix the failing test"
+      - "where did we do the swipe fix?"
+      - "stop the codex agent"
+    routing: "For Herdr, and for starting, checking, prompting or stopping any coding agent session (Claude Code, Codex, omp or any agent Herdr supports), load herdr-voice, not the herdr, claude-code or codex skills and not tmux. You run outside Herdr and that's supported: don't check HERDR_ENV."
 ---
 
 # Herdr coding sessions, by voice

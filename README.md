@@ -70,6 +70,8 @@ Hermes' gateway usually runs as a background service, not in a herdr pane. herdr
 
 Hermes' skill index keeps only the first 60 characters of a description. That's all the model sees when choosing a skill, so the description has to win against Hermes' built-in `claude-code` and `codex` skills, which run agents in tmux or one-shot. The tests enforce the limit.
 
+The `metadata.hark` block in the frontmatter is for [Hark](https://heyhark.app): a one-sentence summary, the command the skill needs, example phrases, and a routing sentence Hark adds to its instructions so Hermes picks this skill for coding agents. Hermes ignores it. The tests check its limits: summary up to 120 characters, routing up to 300, at most six phrases.
+
 ## Running the tests
 
 ```
