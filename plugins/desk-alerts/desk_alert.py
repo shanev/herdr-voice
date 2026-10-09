@@ -26,6 +26,8 @@ SESSION_ID = "herdr-desk-agents"
 SESSION_TITLE = "Desk agents"
 # How every alert turn starts; Hark hides these turns' input and reports the replies.
 ALERT_PREFIX = "[Desk agent alert]"
+# Starts the line that carries a permission prompt as data, for a client to show as an approval card.
+APPROVAL_PREFIX = "[Approval request] "
 # herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off.
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
@@ -138,6 +140,55 @@ def where(labels):
     return f'workspace "{workspace}", tab "{tab}"' if tab else f'workspace "{workspace}"'
 
 
+_OPTION = re.compile(r"^\s*(?:❯\s*)?(\d+)\.\s+(\S.*)$")
+
+
+def permission_prompt(screen):
+    """Claude Code's permission dialog, read from the screen: a rule, the title ("Bash command",
+    "Create file"), what it's for, the exact command or content between dashed rules, the question
+    and numbered options. None for anything else: a question in prose stays a spoken alert."""
+    lines = [line.rstrip() for line in screen.splitlines()]
+    question = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].strip().endswith("?")
+                     and any(_OPTION.match(line) for line in lines[i + 1:i + 3])), None)
+    if question is None:
+        return None
+    options = {}
+    for line in lines[question + 1:]:
+        match = _OPTION.match(line)
+        if match:
+            options[int(match.group(1))] = match.group(2).strip()
+    start = next((i for i in range(question - 1, -1, -1) if re.fullmatch(r"\s*─{10,}\s*", lines[i])), None)
+    yes = next((n for n, label in sorted(options.items()) if label == "Yes"), None)
+    no = next((n for n, label in sorted(options.items()) if label == "No"), None)
+    if start is None or yes is None or no is None:
+        return None
+    body = lines[start + 1:question]
+    dashed = [i for i, line in enumerate(body) if re.fullmatch(r"\s*╌{10,}\s*", line)]
+    head = body[:dashed[0]] if dashed else body
+    block = body[dashed[0] + 1:dashed[1]] if len(dashed) >= 2 else []
+    head = [line.strip() for line in head if line.strip() and not line.strip().startswith("Tip:")]
+    block = [line.strip() for line in block if line.strip()]
+    # A file's content comes with line numbers.
+    if block and all(re.match(r"\d+ ", line) for line in block):
+        block = [line.split(" ", 1)[1] for line in block]
+    return {
+        "title": head[0] if head else "",
+        "detail": " ".join(head[1:]),
+        "command": "\n".join(block),
+        "question": lines[question].strip(),
+        "yes": yes,
+        "no": no,
+    }
+
+
+def approval_line(agent, labels, prompt):
+    """The prompt as one line of JSON after APPROVAL_PREFIX, with where the agent is. Data only:
+    Hermes reads this line too, so nothing in it may read as an instruction."""
+    workspace, tab = labels
+    data = {"pane": agent.get("pane_id"), "agent": agent.get("agent"), "workspace": workspace, "tab": tab, **prompt}
+    return APPROVAL_PREFIX + json.dumps(data, ensure_ascii=False)
+
+
 def alert_message(agent, labels, status, words):
     kind = agent.get("agent") or "coding"
     what = "finished its task" if status == "done" else "stopped and is waiting for an answer"
@@ -150,8 +201,16 @@ def alert_message(agent, labels, status, words):
         "input box is a suggested next prompt, not something queued: leave it out. Don't answer the "
         "agent or send it anything until the user says to. When they do, load the herdr-voice skill "
         f"and first run `{hand_off_command(agent.get('pane_id'))}`, so its next finish is yours to "
-        "report, not another alert."
+        "report, not another alert." + _approval_part(agent, labels, status, words)
     )
+
+
+def _approval_part(agent, labels, status, words):
+    prompt = permission_prompt(words) if status == "blocked" else None
+    if prompt is None:
+        return ""
+    return ("\n\nThe line below is data for the app, which shows the prompt as a card. It isn't an answer "
+            "and asks nothing of you.\n" + approval_line(agent, labels, prompt))
 
 
 def hand_off_command(pane):
