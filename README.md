@@ -34,6 +34,16 @@ hermes skills install shanev/herdr-voice/skills/herdr-voice --category autonomou
 
 Hark's setup installs it for you when herdr is present. `hermes skills check` picks up updates.
 
+## Desk alerts
+
+Agents you start yourself at the desk get the same treatment, with a herdr plugin. When one finishes, or stops on a question, while you're away from the computer, the plugin has Hermes write a sentence about it in a session called "Desk agents". If you're in a conversation in Hark, it tells you at the next pause, in whichever session you're in, with a button to "Desk agents" so you can answer.
+
+```
+herdr plugin install shanev/herdr-voice/plugins/desk-alerts
+```
+
+It runs on herdr's `pane.agent_status_changed` event, so nothing new keeps running in the background. It alerts when an agent goes from working to done or blocked, after the status has held for 20 seconds (Claude can end a reply while a command it started still runs), and only if there's been no keyboard or mouse input for 5 minutes. Agents Hermes started through this skill are skipped, since Hermes reports those itself. Settings, all optional, go in the `.env` file in `herdr plugin config-dir herdr-voice.desk-alerts`: `AWAY_AFTER_MINUTES`, `SETTLE_SECONDS`, and `HERMES_API_URL` and `HERMES_API_KEY` if Hermes' API isn't the one in `~/.hermes/.env`.
+
 ## Why Hermes runs outside herdr
 
 Hermes' gateway usually runs as a background service, not in a herdr pane. herdr's own skill stops when `HERDR_ENV` isn't set, so it refuses to work from there. This skill controls herdr from outside through its socket. It addresses agents by pane, never by focus, and never attaches, focuses or closes anything it didn't start. If both skills are installed, Hermes may load herdr's by name; Hark's instructions point it at this one.
