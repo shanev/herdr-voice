@@ -16,11 +16,19 @@ Run coding agents in [herdr](https://herdr.dev) by talking to [Hermes](https://h
 
 > Stop the codex agent.
 
-A new session is always a new agent. It opens as a tab in the repo's herdr workspace, or in a new workspace if the repo doesn't have one yet. It's unnamed, like an agent you start yourself, so herdr's sidebar shows `hark · 2` with `claude` under it, and that's how Hermes refers to it. It never touches the agents already running there.
+> What's waiting on me?
+
+> Where did we do the swipe fix?
+
+A new session is always a new agent. It opens as a tab in the repo's herdr workspace, or in a new workspace if the repo doesn't have one yet. It gets a permanent name taken from the task, like `apple-models`, which herdr's sidebar shows in place of the agent's kind, and that's how Hermes refers to it. Agents you start yourself at the desk stay unnamed, so Hermes calls them by workspace and tab, like `hark · 2`. It never touches the agents already running there.
 
 It works with every agent herdr can start: Claude Code, Codex, omp, Grok, pi, OpenCode, Cursor, Gemini, Amp and the rest. Hermes asks once whether sessions should run with permission prompts off and remembers your answer. For agents the skill doesn't list, it finds the flag in the agent's `--help`.
 
-Hermes doesn't sit waiting while an agent works. It hands the wait to a background subagent, so you can keep talking, and tells you when the agent is done or stuck. Ask it to wait instead and it will.
+Hermes doesn't sit waiting while an agent works. It hands the wait to a background subagent, so you can keep talking, and tells you when the agent is done or stuck. Ask it to wait instead and it will. When one request starts several agents, you get one report once they're all done, not one per agent. A done report mentions what the task cost and how full the agent's context is, when the agent's status line shows them.
+
+"What's waiting on me?" goes through every agent and tells you which are still working, which have a question for you (and what it is), and which finished with a result you haven't heard yet. "Where did we do the swipe fix?" searches the agents' transcripts and tells you which one worked on it, without sending it anything.
+
+Short phrases work too: "status" for what's running, "waiting on me" or "anything for me" for the sweep above, "nudge" an agent to have it carry on with its task, and "stop" one to interrupt it.
 
 Replies are written to be heard: a few sentences on what changed, whether tests passed and what's left, never terminal output read aloud. The skill also expects speech-to-text mishearings ("herder" or "burger" for herdr, "cloud code" for Claude Code).
 
