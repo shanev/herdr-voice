@@ -47,6 +47,8 @@ Every command prints JSON; read ids and states from it. For anything not covered
 
 Read each idle or done agent's last reply with `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>`; if it exits with status 3, use `herdr agent read <agent> --source recent-unwrapped --lines 200` and take only its last message. Leave out agents that are `blocked` on a live prompt: handle each with **Blocked** below. Report group by group, naming each agent as the sidebar shows it, and skip empty groups and idle agents with nothing new.
 
+**One at a time** (the user says "let's go one by one", or after any triage report where their reply is ambiguous about which agent it answers): do the same sweep silently, but report only ONE agent — the first **Needs you** one, else the first **Finished** one — and end the turn. Their reply closes that agent (answer it to the agent, dismiss it, or "next"), then report the next one the same way. Never batch: a list makes "yes" ambiguous about which agent it answers. Keep the silent sweep's counts in mind and say "that's the last one" on the final agent.
+
 **Start a session** ("new Claude session for hark", "start omp in hark"). It works the same for every agent Herdr supports; `herdr agent start --help` lists the `--kind` values. Match the spoken agent to a kind (Cursor's is `cursor`, Antigravity's is `agy`). A request for a new session always means a new agent, even if one is already running in that repo, idle or not. Reuse an existing agent only when the user asks for it. Do it all without asking, in this order:
 
 1. **Repo:** find its path, e.g. `~/<repo>` or `~/github.com/*/<repo>`. Ask only if more than one matches, or none does. Never create the repo's folder.
