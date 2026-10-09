@@ -21,11 +21,31 @@ For interactive coding agent sessions on this machine (Claude Code, Codex, or an
 
 Read requests generously: "herder", "hurdle", "burger" mean Herdr; "harp", "heart", "hearth" usually mean the repo `hark`; "quad code", "cloud code" mean Claude Code, and a "cloud agent" or "cloud session" is a Claude one. Match spoken names against `herdr agent list` and the user's repos before asking.
 
+## Voice vocabulary
+
+Short spoken phrases map to recipes below. Match them generously: speech-to-text drops and swaps words ("judge" or "notch" for nudge, "anything from me" for anything for me).
+
+- "status", "what's going on": **What's running**.
+- "waiting on me", "anything for me", "what needs me": **What's waiting on me**.
+- "where did we do X", "which session did X": **Where did we do this**.
+- "nudge X": send X `herdr agent prompt <agent> "Continue with your current task."` and hand off the waiting as in **Send a task**.
+- "stop X": **Stop**.
+
+X is an agent, matched as in **What's running**.
+
 ## Recipes
 
 Every command prints JSON; read ids and states from it. For anything not covered here, print a command group's usage by running it without a subcommand (`herdr agent`, `herdr workspace`, `herdr tab`, `herdr pane`). Never run bare `herdr`: it opens the interactive UI.
 
 **What's running:** `herdr agent list`. When the user says "sessions" they mean these coding agents, not Herdr's server sessions (`herdr session list` is almost never what they want). Speak of each agent by its `name` when it has one ("apple-models in hark"); otherwise the way Herdr's sidebar shows it: workspace label and tab label ("asterism 2", labels from `herdr workspace list` and `herdr tab list --workspace <id>`). Then give its kind and state: idle or done means waiting for input, working, or blocked. To match the user's words back to a `pane_id`, try the names first ("the apple models agent" is `apple-models`, spoken with spaces for dashes), and fall back to workspace and tab ("the asterism 2 agent", "the Claude in hark") only for agents started at the desk that never got a name.
+
+**What's waiting on me:** sweep every agent in `herdr agent list` and sort it into one of three groups:
+
+- **Still working:** `agent_status` is `working`. No read needed.
+- **Needs you:** idle or done, and its last reply ends on a decision or question for the user. Give the actual question in one sentence.
+- **Finished:** idle or done, with a result you haven't already told the user in this conversation. Give the result in a sentence.
+
+Read each idle or done agent's last reply with `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>`; if it exits with status 3, use `herdr agent read <agent> --source recent-unwrapped --lines 200` and take only its last message. Leave out agents that are `blocked` on a live prompt: handle each with **Blocked** below. Report group by group, naming each agent as the sidebar shows it, and skip empty groups and idle agents with nothing new.
 
 **Start a session** ("new Claude session for hark", "start omp in hark"). It works the same for every agent Herdr supports; `herdr agent start --help` lists the `--kind` values. Match the spoken agent to a kind (Cursor's is `cursor`, Antigravity's is `agy`). A request for a new session always means a new agent, even if one is already running in that repo, idle or not. Reuse an existing agent only when the user asks for it. Do it all without asking, in this order:
 
@@ -69,7 +89,7 @@ If `agent start` fails with `agent_not_ready` (blocked during startup), read the
 
 2. If it's already `done` or `idle`, read the result now (below). If it's `blocked`, handle it as below. Otherwise hand the waiting to a background subagent with `delegate_task`; its result comes back to this conversation by itself when the agent finishes. Give it this goal, with `<agent>` filled in:
 
-   > Wait for the Herdr coding agent `<agent>` to finish. Run `herdr agent wait <agent> --until done --until idle --until blocked --timeout 540000` with the terminal tool's `timeout=560`, and run it again while the agent is still `working`. Never `sleep` and poll. Then run `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>`; if it exits with status 3, run `herdr agent read <agent> --source recent-unwrapped --lines 200` and take only the agent's last message. If the agent is `blocked`, read the screen with `herdr agent read <agent> --source visible` and report the question it asks. If the reply says it's still waiting on a command it started in the background, the task isn't finished: run `herdr agent wait <agent> --until working --timeout 540000`, then wait for it to finish again as above. Don't send the agent anything. Report the agent's final state and its last reply or question, word for word.
+   > Wait for the Herdr coding agent `<agent>` to finish. Run `herdr agent wait <agent> --until done --until idle --until blocked --timeout 540000` with the terminal tool's `timeout=560`, and run it again while the agent is still `working`. Never `sleep` and poll. Then run `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>`; if it exits with status 3, run `herdr agent read <agent> --source recent-unwrapped --lines 200` and take only the agent's last message. If the agent is `blocked`, read the screen with `herdr agent read <agent> --source visible` and report the question it asks. Also look at the coding agent's status line at the bottom of `herdr agent read <agent> --source visible` and report the spend and context percentage if it shows them. If the reply says it's still waiting on a command it started in the background, the task isn't finished: run `herdr agent wait <agent> --until working --timeout 540000`, then wait for it to finish again as above. Don't send the agent anything. Report the agent's final state and its last reply or question, word for word.
 
 3. After the `delegate_task` call, tell the user it's started and that you'll tell them when it's done ("Claude's on it in asterism 2. I'll tell you when it's done."), then end your turn. Everything you write is spoken, so that sentence is said once, there: between sending the task and the `delegate_task` call, write nothing, and don't say before the call that the agent is on it. Don't run `herdr agent wait`, read the screen or check files yourself after sending a task, even for a task that looks quick: the user is talking to you and hears nothing while you wait.
 
@@ -79,9 +99,13 @@ Wait in your own turn instead only when the user asks you to ("do it and wait", 
 
 **Tell me when it's done** ("let me know when asterism 2 finishes"): mark it as yours (the `touch` line above), start the same background subagent for that agent, even one you didn't start, and tell the user you will.
 
+**Several agents at once:** when one request starts or prompts several agents, do step 1 of **Send a task** for each, then call `delegate_task` once per agent with the goal above, plus once more for the whole batch with this goal: wait for each of `<agent>`, `<agent>`, … in turn as above, and return all their final states and replies together. Say the hand-off sentence once, for the whole batch. Results come back as separate messages, one per subagent, and the per-agent ones race the batch one. On each arrival, check whether you now have a result for every agent in the batch: if not, end your turn without saying anything; if so, report them all once, in one reply. Results that arrive after you've reported the set are duplicates: end your turn without speaking.
+
 **Desk alerts:** a turn that starts with `[Desk agent alert]` comes from the desk-alerts plugin: an agent the user started at the desk finished or stopped on a question while they were away. Say what happened in a sentence or two, as it asks. Don't send the agent anything until the user says so.
 
 **Read the result:** `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>` (`scripts/last_reply.py` in this skill's folder) prints the agent's last reply from its own session file (Claude Code and Codex), complete however long it is. If it exits with status 3 (another agent kind, or no finished reply), read the screen instead: `herdr agent read <agent> --source recent-unwrapped --lines 200`, and take only the agent's last message after your prompt, not the whole screen. Claude can end its reply while a background command it started is still running; then its `✻ … done` line on screen says a shell is still running: say so, and wait again before reporting the task finished.
+
+**Where did we do this** ("where did we do the swipe fix"): find which agent's session dealt with a topic by searching transcripts, not by asking agents. For each agent in `herdr agent list`, its `agent_session` points at its transcript: with `kind` `path`, `value` is the file (omp); with `kind` `id`, it's `~/.claude/projects/*/<value>.jsonl` for Claude and `~/.codex/sessions/*/*/*/rollout-*-<value>.jsonl` for Codex. Run `grep -l -i -F "<phrase>"` over those files, trying a shorter key phrase if nothing matches. Tell the user which agent worked on it, named as the sidebar shows it, and its `pane_id`; if they want to know what it concluded, read its reply with `scripts/last_reply.py`. This is read-only: never prompt, interrupt, or focus an agent because of a match.
 
 **Suggested prompts:** Claude Code shows a suggested next prompt, dimmed, in its empty input box after a reply. A screen read shows it as ordinary text after `❯`. It isn't queued and isn't the agent's question: never report it, and never send `Enter` for it.
 
@@ -93,4 +117,4 @@ Wait in your own turn instead only when the user asks you to ("do it and wait", 
 
 ## Reporting back by voice
 
-The user hears your reply, so speak like a colleague: what changed, whether tests passed, what's committed or still open, in two to four sentences. Never read out terminal output, diffs, or file contents; offer to put details on screen instead. When you start a long task, say so and that you'll report when it's done.
+The user hears your reply, so speak like a colleague: what changed, whether tests passed, what's committed or still open, in two to four sentences. When a task finished and its spend or context usage was on screen (Claude and others show both in the status line at the bottom), add one short sentence: "That took about eleven cents, context at six percent." If they weren't visible, leave it out without comment. Never read out terminal output, diffs, or file contents; offer to put details on screen instead. When you start a long task, say so and that you'll report when it's done.

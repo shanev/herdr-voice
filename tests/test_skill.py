@@ -74,6 +74,46 @@ class Recipes(unittest.TestCase):
         blocked = next(line for line in TEXT.splitlines() if line.startswith("**Blocked:**"))
         self.assertIn("the `touch` line above", blocked)
 
+    def test_triage_sweeps_every_agent(self):
+        # "What's waiting on me" reads each idle agent's reply, and leaves live prompts to Blocked.
+        self.assertIn("**What's waiting on me:**", TEXT)
+        section = TEXT.split("**What's waiting on me:**")[1].split("\n**")[0]
+        self.assertIn("scripts/last_reply.py <agent>", section)
+        self.assertIn("--source recent-unwrapped --lines 200", section)
+        self.assertIn("**Blocked**", section)
+
+    def test_batch_reports_once(self):
+        # Per-agent waiters race a batch waiter; the parent speaks once, when the set is complete.
+        self.assertIn("**Several agents at once:**", TEXT)
+        section = TEXT.split("**Several agents at once:**")[1].split("\n**")[0]
+        self.assertIn("`delegate_task` once per agent", section)
+        self.assertIn("for the whole batch", section)
+        self.assertIn("duplicates", section)
+
+    def test_reports_cost_and_context_when_visible(self):
+        self.assertIn("context percentage", TEXT)
+        self.assertIn("context at six percent", TEXT)
+
+    def test_recall_search_is_read_only(self):
+        self.assertIn("**Where did we do this**", TEXT)
+        section = TEXT.split("\n**Where did we do this**")[1].split("\n**")[0]
+        for needle in ("agent_session", "~/.claude/projects/", "grep -l", "pane_id", "read-only"):
+            self.assertIn(needle, section)
+
+    def test_voice_vocabulary_maps_to_recipes(self):
+        self.assertIn("## Voice vocabulary", TEXT)
+        section = TEXT.split("## Voice vocabulary")[1].split("\n## ")[0]
+        for phrase, recipe in [
+            ('"status"', "**What's running**"),
+            ('"waiting on me"', "**What's waiting on me**"),
+            ('"where did we do X"', "**Where did we do this**"),
+            ('"nudge X"', "herdr agent prompt <agent>"),
+            ('"stop X"', "**Stop**"),
+        ]:
+            line = next(line for line in section.splitlines() if phrase in line)
+            self.assertIn(recipe, line)
+            self.assertIn(recipe.strip("*"), TEXT.replace(section, ""))
+
     def test_waits_fit_hermes_terminal_limit(self):
         # Hermes' foreground terminal limit is 600 s.
         for ms in re.findall(r"--timeout (\d+)", TEXT):
