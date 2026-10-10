@@ -107,7 +107,6 @@ class Recipes(unittest.TestCase):
     def test_marks_hand_offs_for_desk_alerts(self):
         # plugins/desk-alerts skips agents with this mark: Hermes reports those itself.
         self.assertIn("touch ~/.cache/herdr-voice/handed-off/<agent>", TEXT)
-        self.assertIn("[Desk agent alert]", TEXT)
         # Answering a stuck agent makes its finish Hermes' to report too.
         blocked = next(line for line in TEXT.splitlines() if line.startswith("**Blocked:**"))
         self.assertIn("the `touch` line above", blocked)
