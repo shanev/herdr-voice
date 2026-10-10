@@ -17,7 +17,9 @@ spec.loader.exec_module(desk_alert)
 class Manifest(unittest.TestCase):
     def test_hooks_agent_status_changes(self):
         manifest = tomllib.loads((PLUGIN / "herdr-plugin.toml").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["events"], [{"on": "pane.agent_status_changed", "command": ["python3", "desk_alert.py"]}])
+        hook = ["python3", "desk_alert.py"]
+        self.assertEqual(manifest["events"], [{"on": on, "command": hook} for on in
+                                              ("pane.agent_status_changed", "pane.closed", "pane.exited", "pane.moved")])
 
 
 class Transitions(unittest.TestCase):
@@ -37,6 +39,63 @@ class Transitions(unittest.TestCase):
             self.assertEqual(desk_alert.record_status(path, "w1:p1", "done"), ("working", 2))
             self.assertEqual(desk_alert.record_status(path, "w1:p2", "working"), ("idle", 2))
             self.assertEqual(desk_alert.latest_event(path, "w1:p1"), 2)
+
+
+class Resolved(unittest.TestCase):
+    """A question is over once its pane leaves `blocked` or goes away: Hermes is told, once."""
+
+    def run_hook(self, events, statuses=()):
+        sent = []
+        original = desk_alert.post, desk_alert.state_dir, desk_alert.config_for, desk_alert.running_agent
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                state = Path(folder)
+                for pane, status in statuses:
+                    desk_alert.record_status(state / "statuses.json", pane, status)
+                desk_alert.state_dir = lambda: state
+                desk_alert.config_for = lambda state: {"key": "k", "url": "http://hermes"}
+                desk_alert.post = lambda url, key, body, timeout: sent.append((url, body))
+                # An agent back at work or done at the desk isn't away news here.
+                desk_alert.running_agent = lambda pane: None
+                for data in events:
+                    os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps({"data": data})
+                    desk_alert.main()
+        finally:
+            desk_alert.post, desk_alert.state_dir, desk_alert.config_for, desk_alert.running_agent = original
+            os.environ.pop("HERDR_PLUGIN_EVENT_JSON", None)
+        return sent
+
+    def status(self, pane, status):
+        return {"type": "pane_agent_status_changed", "pane_id": pane, "agent_status": status}
+
+    def test_answered_or_quit_resolves_the_question(self):
+        for status in ("working", "done", "idle"):
+            sent = self.run_hook([self.status("w1:p1", status)], [("w1:p1", "working"), ("w1:p1", "blocked")])
+            self.assertEqual(sent, [("http://hermes/v1/hark/desk/resolved", {"pane": "w1:p1"})], status)
+
+    def test_only_a_blocked_pane_has_a_question(self):
+        self.assertEqual(self.run_hook([self.status("w1:p1", "done")], [("w1:p1", "working")]), [])
+        self.assertEqual(self.run_hook([self.status("w1:p1", "blocked")], [("w1:p1", "working")]), [])
+
+    def test_a_closed_exited_or_moved_pane_resolves_its_question(self):
+        for data in ({"type": "pane_closed", "pane_id": "w1:p1", "workspace_id": "w1"},
+                     {"type": "pane_exited", "pane_id": "w1:p1", "workspace_id": "w1"},
+                     {"type": "pane_moved", "previous_pane_id": "w1:p1", "previous_workspace_id": "w1",
+                      "previous_tab_id": "w1:t1", "pane": {"pane_id": "w2:p4"}}):
+            sent = self.run_hook([data, data], [("w1:p1", "blocked")])
+            self.assertEqual(sent, [("http://hermes/v1/hark/desk/resolved", {"pane": "w1:p1"})], data["type"])
+        closed = {"type": "pane_closed", "pane_id": "w1:p1", "workspace_id": "w1"}
+        self.assertEqual(self.run_hook([closed], [("w1:p1", "done")]), [])
+
+    def test_a_gateway_without_hark_auth_is_skipped(self):
+        def refuse(url, key, body, timeout):
+            raise desk_alert.urllib.error.HTTPError(url, 404, "Not Found", None, None)
+        original = desk_alert.post
+        desk_alert.post = refuse
+        try:
+            desk_alert.resolve({"key": "k", "url": "http://hermes"}, "w1:p1")
+        finally:
+            desk_alert.post = original
 
 
 class HandOffs(unittest.TestCase):
