@@ -137,32 +137,55 @@ class Settling(unittest.TestCase):
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
-class PermissionPrompts(unittest.TestCase):
-    def test_a_bash_command(self):
-        self.assertEqual(desk_alert.permission_prompt((FIXTURES / "claude_bash_prompt.txt").read_text(encoding="utf-8")), {
-            "title": "Bash command", "detail": "Write current date to stamp.txt", "command": "date > stamp.txt",
-            "question": "Do you want to proceed?", "yes": 1, "no": 4})
+class Questions(unittest.TestCase):
+    agent = {"agent": "codex", "pane_id": "w4:p1", "cwd": "/src/x"}
 
-    def test_a_new_file(self):
-        self.assertEqual(desk_alert.permission_prompt((FIXTURES / "claude_write_prompt.txt").read_text(encoding="utf-8")), {
-            "title": "Create file", "detail": "notes.md", "command": "hello from the desk",
-            "question": "Do you want to create notes.md?", "yes": 1, "no": 3})
+    def data(self, message):
+        line = next(line for line in message.splitlines() if line.startswith(desk_alert.QUESTION_PREFIX))
+        return json.loads(line.removeprefix(desk_alert.QUESTION_PREFIX))
 
-    def test_a_question_in_prose_isnt_a_prompt(self):
-        self.assertIsNone(desk_alert.permission_prompt("⏺ Which branch should I use, main or dev?\n\n❯ \n"))
-
-    def test_the_alert_carries_it_as_data(self):
+    def test_a_blocked_alert_carries_the_screen_as_data(self):
+        # Any agent's dialog: the app reads the question from the screen, so nothing here parses it.
         screen = (FIXTURES / "claude_bash_prompt.txt").read_text(encoding="utf-8")
-        agent = {"agent": "claude", "pane_id": "w4:p1", "cwd": "/src/x"}
-        message = desk_alert.alert_message(agent, ("asterism", "2"), "blocked", screen)
-        line = next(line for line in message.splitlines() if line.startswith(desk_alert.APPROVAL_PREFIX))
-        data = json.loads(line.removeprefix(desk_alert.APPROVAL_PREFIX))
-        self.assertEqual((data["pane"], data["agent"], data["workspace"], data["tab"], data["command"], data["yes"], data["no"]),
-                         ("w4:p1", "claude", "asterism", "2", "date > stamp.txt", 1, 4))
-        # Data only. With the answer's wording in it, Hermes approved the prompt by itself, live.
-        self.assertEqual(set(data), {"pane", "agent", "workspace", "tab", "title", "detail", "command", "question", "yes", "no"})
-        # A finished agent's reply is never read as a prompt.
-        self.assertNotIn(desk_alert.APPROVAL_PREFIX, desk_alert.alert_message(agent, ("asterism", "2"), "done", screen))
+        data = self.data(desk_alert.alert_message(self.agent, ("asterism", "2"), "blocked", screen))
+        self.assertEqual((data["pane"], data["agent"], data["workspace"], data["tab"]), ("w4:p1", "codex", "asterism", "2"))
+        self.assertIn("Do you want to proceed?\n ❯ 1. Yes", data["screen"])
+        self.assertEqual(Path(data["script"]), PLUGIN / "desk_alert.py")
+        # Data only. With the answer's wording in it, Hermes approved a prompt by itself, live.
+        self.assertEqual(set(data), {"pane", "agent", "workspace", "tab", "screen", "script"})
+
+    def test_the_screen_is_sent_once(self):
+        message = desk_alert.alert_message(self.agent, ("asterism", None), "blocked", "Allow npm publish?\n 1. Yes\n 2. No")
+        self.assertEqual(message.count("Allow npm publish?"), 1)
+        self.assertIn("`screen` of the data line", message)
+
+    def test_blank_lines_and_trailing_spaces_are_dropped(self):
+        self.assertEqual(desk_alert.screen_text("a   \n\n  \n b\n"), "a\n b")
+        self.assertEqual(len(desk_alert.screen_text("x" * 9000)), 6000)
+
+    def test_a_finished_agent_has_no_question(self):
+        message = desk_alert.alert_message(self.agent, ("asterism", "2"), "done", "Tests pass.\n 1. Yes")
+        self.assertNotIn(desk_alert.QUESTION_PREFIX, message)
+        self.assertIn("Its last reply:\n\nTests pass.", message)
+
+
+class Realert(unittest.TestCase):
+    def test_delivers_for_the_agent_still_blocked(self):
+        spawned = []
+        original = desk_alert.deliver_detached, desk_alert.state_dir, desk_alert.config_for
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                state = Path(folder)
+                desk_alert.record_status(state / "statuses.json", "w1:p1", "working")
+                desk_alert.record_status(state / "statuses.json", "w1:p1", "blocked")
+                desk_alert.state_dir = lambda: state
+                desk_alert.config_for = lambda state: {"key": "k"}
+                desk_alert.deliver_detached = lambda *args: spawned.append(args[2:])
+                desk_alert.realert("w1:p1")
+        finally:
+            desk_alert.deliver_detached, desk_alert.state_dir, desk_alert.config_for = original
+        # The pane's own latest event: an answer that sets it working again drops this alert.
+        self.assertEqual(spawned, [("w1:p1", "blocked", 2)])
 
 
 class Message(unittest.TestCase):

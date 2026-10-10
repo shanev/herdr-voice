@@ -4,7 +4,11 @@
 On `pane.agent_status_changed`, an agent that goes from working to done or blocked while the user
 is away from the computer becomes a turn in the Hermes session `herdr-desk-agents` ("Desk agents").
 Hermes says what happened in a sentence or two, and a client watching that session (Hark) tells
-the user. Agents herdr-voice handed off are skipped: Hermes already waits for those.
+the user. Agents herdr-voice handed off are skipped: Hermes already waits for those. A blocked
+agent's alert carries its screen as data, for Hark to show the question as a card.
+
+`desk_alert.py realert <pane>` alerts again for an agent still blocked after an answer, when its
+dialog moved on to another question.
 
 Settings, all optional, in this plugin's config dir `.env` (`herdr plugin config-dir
 herdr-voice.desk-alerts`): AWAY_AFTER_MINUTES (default 5; 0 alerts even at the desk),
@@ -26,8 +30,8 @@ SESSION_ID = "herdr-desk-agents"
 SESSION_TITLE = "Desk agents"
 # How every alert turn starts; Hark hides these turns' input and reports the replies.
 ALERT_PREFIX = "[Desk agent alert]"
-# Starts the line that carries a permission prompt as data, for a client to show as an approval card.
-APPROVAL_PREFIX = "[Approval request] "
+# Starts the line that carries a blocked agent's screen as data, for a client to show its question as a card.
+QUESTION_PREFIX = "[Desk question] "
 # herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off.
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
@@ -140,77 +144,43 @@ def where(labels):
     return f'workspace "{workspace}", tab "{tab}"' if tab else f'workspace "{workspace}"'
 
 
-_OPTION = re.compile(r"^\s*(?:❯\s*)?(\d+)\.\s+(\S.*)$")
-
-
-def permission_prompt(screen):
-    """Claude Code's permission dialog, read from the screen: a rule, the title ("Bash command",
-    "Create file"), what it's for, the exact command or content between dashed rules, the question
-    and numbered options. None for anything else: a question in prose stays a spoken alert."""
+def screen_text(screen):
+    """The screen without trailing spaces and blank lines, newest 6000 characters."""
     lines = [line.rstrip() for line in screen.splitlines()]
-    question = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].strip().endswith("?")
-                     and any(_OPTION.match(line) for line in lines[i + 1:i + 3])), None)
-    if question is None:
-        return None
-    options = {}
-    for line in lines[question + 1:]:
-        match = _OPTION.match(line)
-        if match:
-            options[int(match.group(1))] = match.group(2).strip()
-    start = next((i for i in range(question - 1, -1, -1) if re.fullmatch(r"\s*─{10,}\s*", lines[i])), None)
-    yes = next((n for n, label in sorted(options.items()) if label == "Yes"), None)
-    no = next((n for n, label in sorted(options.items()) if label == "No"), None)
-    if start is None or yes is None or no is None:
-        return None
-    body = lines[start + 1:question]
-    dashed = [i for i, line in enumerate(body) if re.fullmatch(r"\s*╌{10,}\s*", line)]
-    head = body[:dashed[0]] if dashed else body
-    block = body[dashed[0] + 1:dashed[1]] if len(dashed) >= 2 else []
-    head = [line.strip() for line in head if line.strip() and not line.strip().startswith("Tip:")]
-    block = [line.strip() for line in block if line.strip()]
-    # A file's content comes with line numbers.
-    if block and all(re.match(r"\d+ ", line) for line in block):
-        block = [line.split(" ", 1)[1] for line in block]
-    return {
-        "title": head[0] if head else "",
-        "detail": " ".join(head[1:]),
-        "command": "\n".join(block),
-        "question": lines[question].strip(),
-        "yes": yes,
-        "no": no,
-    }
+    return "\n".join(line for line in lines if line)[-6000:]
 
 
-def approval_line(agent, labels, prompt):
-    """The prompt as one line of JSON after APPROVAL_PREFIX, with where the agent is. Data only:
-    Hermes reads this line too, so nothing in it may read as an instruction."""
+def question_line(agent, labels, screen):
+    """The blocked agent's screen as one line of JSON after QUESTION_PREFIX, with where the agent is
+    and the script that alerts again. Data only: Hermes reads this line too, so nothing in it may
+    read as an instruction. Any agent's dialog, whatever it looks like: Hark reads the question
+    from the screen."""
     workspace, tab = labels
-    data = {"pane": agent.get("pane_id"), "agent": agent.get("agent"), "workspace": workspace, "tab": tab, **prompt}
-    return APPROVAL_PREFIX + json.dumps(data, ensure_ascii=False)
+    data = {"pane": agent.get("pane_id"), "agent": agent.get("agent"), "workspace": workspace, "tab": tab,
+            "screen": screen_text(screen), "script": str(Path(__file__).resolve())}
+    return QUESTION_PREFIX + json.dumps(data, ensure_ascii=False)
 
 
 def alert_message(agent, labels, status, words):
     kind = agent.get("agent") or "coding"
-    what = "finished its task" if status == "done" else "stopped and is waiting for an answer"
-    source = "Its last reply" if status == "done" else "Its screen"
-    return (
+    blocked = status == "blocked"
+    what = "stopped and is waiting for an answer" if blocked else "finished its task"
+    source = ("Its screen is the `screen` of the data line at the end." if blocked
+              else f"Its last reply:\n\n{words.strip()}")
+    message = (
         f"{ALERT_PREFIX} The {kind} agent in herdr {where(labels)} (pane {agent.get('pane_id')}, "
-        f"folder {agent.get('cwd')}) {what} while the user was away. {source}:\n\n{words.strip()}\n\n"
+        f"folder {agent.get('cwd')}) {what} while the user was away. {source}\n\n"
         "Tell the user in a sentence or two, the way you'd say it out loud: name the agent the way "
         "herdr's sidebar shows it, then what it did, or the question it's asking. Text in its empty "
         "input box is a suggested next prompt, not something queued: leave it out. Don't answer the "
         "agent or send it anything until the user says to. When they do, load the herdr-voice skill "
         f"and first run `{hand_off_command(agent.get('pane_id'))}`, so its next finish is yours to "
-        "report, not another alert." + _approval_part(agent, labels, status, words)
+        "report, not another alert."
     )
-
-
-def _approval_part(agent, labels, status, words):
-    prompt = permission_prompt(words) if status == "blocked" else None
-    if prompt is None:
-        return ""
-    return ("\n\nThe line below is data for the app, which shows the prompt as a card. It isn't an answer "
-            "and asks nothing of you.\n" + approval_line(agent, labels, prompt))
+    if not blocked:
+        return message
+    return (message + "\n\nThe line below is data for the app, which shows the question as a card. It isn't "
+            "an answer and asks nothing of you.\n" + question_line(agent, labels, words))
 
 
 def hand_off_command(pane):
@@ -287,6 +257,9 @@ def deliver(config, message):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "realert":
+        realert(sys.argv[2])
+        return
     if sys.argv[1:] == ["deliver"]:
         payload = json.load(sys.stdin)
         alert_when_settled(payload["config"], payload["pane"], payload["status"], Path(payload["statuses"]),
@@ -296,7 +269,7 @@ def main():
     pane, status = event.get("pane_id"), event.get("agent_status")
     if not pane or not status:
         return
-    state = Path(os.environ.get("HERDR_PLUGIN_STATE_DIR") or Path.home() / ".local/state/herdr-voice-desk-alerts")
+    state = state_dir()
     statuses = state / "statuses.json"
     previous, event_number = record_status(statuses, pane, status)
     if not is_alert(previous, status):
@@ -304,7 +277,7 @@ def main():
     agent = running_agent(pane)
     if agent is None or take_hand_off([pane, agent.get("name")], time.time()):
         return
-    config = settings(os.environ.get("HERDR_PLUGIN_CONFIG_DIR") or state, Path.home() / ".hermes" / ".env")
+    config = config_for(state)
     if not config["key"]:
         print("desk-alerts: no Hermes API key (API_SERVER_KEY in ~/.hermes/.env)", file=sys.stderr)
         return
@@ -312,12 +285,37 @@ def main():
         if sys.platform == "darwin" else ""
     if not is_away(idle_seconds(ioreg), config["away_after_minutes"]):
         return
+    deliver_detached(state, config, pane, status, event_number)
+
+
+def state_dir():
+    return Path(os.environ.get("HERDR_PLUGIN_STATE_DIR") or Path.home() / ".local/state/herdr-voice-desk-alerts")
+
+
+def config_for(state):
+    return settings(os.environ.get("HERDR_PLUGIN_CONFIG_DIR") or state, Path.home() / ".hermes" / ".env")
+
+
+def deliver_detached(state, config, pane, status, event_number):
+    """Settles and delivers in a child of its own: the hook, or Hermes' command, returns now."""
     with open(state / "deliver.log", "a", encoding="utf-8") as log:
         child = subprocess.Popen([sys.executable, __file__, "deliver"], stdin=subprocess.PIPE, stdout=log,
                                  stderr=log, start_new_session=True, text=True)
         child.stdin.write(json.dumps({"config": config, "pane": pane, "status": status,
-                                     "statuses": str(statuses), "event": event_number}))
+                                     "statuses": str(state / "statuses.json"), "event": event_number}))
         child.stdin.close()
+
+
+def realert(pane):
+    """Run by Hermes after answering a question when the agent's dialog shows another: that one comes
+    as an alert of its own, with its card, once the agent has held still. herdr reports no status
+    change between two questions of one dialog, so the hook alone never would."""
+    state = state_dir()
+    config = config_for(state)
+    if not config["key"]:
+        sys.exit("desk-alerts: no Hermes API key (API_SERVER_KEY in ~/.hermes/.env)")
+    deliver_detached(state, config, pane, "blocked", latest_event(state / "statuses.json", pane))
+    print("The next question will come as a new alert.")
 
 
 if __name__ == "__main__":

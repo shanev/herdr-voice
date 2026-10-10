@@ -58,7 +58,7 @@ Agents you start yourself at the desk get the same treatment, with a herdr plugi
 herdr plugin install shanev/herdr-voice/plugins/desk-alerts
 ```
 
-When the agent stopped on a Claude Code permission prompt, the alert also carries the prompt as data, so Hark shows it as a card with the exact command and Approve once / Deny. A tap sends Hermes a turn that answers the prompt only if it's still on screen; it may have been answered at the desk already.
+When the agent stopped on a question or a permission prompt, whatever agent it is, the alert also carries its screen as data. Hark reads the question and its options from it and shows them as a card, with a button per option and a field for a typed answer. A tap sends Hermes a turn that answers only if the question is still on screen; it may have been answered at the desk already. When the dialog has another question after that one, it comes as a new alert with its own card.
 
 It runs on herdr's `pane.agent_status_changed` event, so nothing new keeps running in the background. It alerts when an agent goes from working to done or blocked, after the status has held for 20 seconds (Claude can end a reply while a command it started still runs), and only if there's been no keyboard or mouse input for 5 minutes. Agents Hermes started through this skill are skipped, since Hermes reports those itself. Settings, all optional, go in the `.env` file in `herdr plugin config-dir herdr-voice.desk-alerts`: `AWAY_AFTER_MINUTES`, `SETTLE_SECONDS`, and `HERMES_API_URL` and `HERMES_API_KEY` if Hermes' API isn't the one in `~/.hermes/.env`.
 
