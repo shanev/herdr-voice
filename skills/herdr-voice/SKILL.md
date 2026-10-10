@@ -150,7 +150,15 @@ Tell the user you'll merge it when the checks pass and let them know. When the r
 
 **Suggested prompts:** Claude Code shows a suggested next prompt, dimmed, in its empty input box after a reply. A screen read shows it as ordinary text after `❯`. It isn't queued and isn't the agent's question: never report it, and never send `Enter` for it.
 
-**Blocked:** read the screen and tell the user the question in one sentence. Answer it with `send-keys` only once they reply. For a permission prompt, pick the plain yes or no; "always allow" or a mode switch only when the user asks for it. Before answering, mark the agent as yours (the `touch` line above), so its finish isn't announced again as a desk alert, then wait for it and report as for a task.
+**Blocked:** read the screen and tell the user the question in one sentence. Answer it only once they reply, as in **Answer a question**. For a permission prompt, pick the plain yes or no; "always allow" or a mode switch only when the user asks for it. Before answering, mark the agent as yours (the `touch` line above), so its finish isn't announced again as a desk alert, then wait for it and report as for a task.
+
+**Answer a question:** every agent draws its question dialog differently, so read the screen (`herdr agent read <agent> --source visible`) and find the user's option in the dialog at the bottom.
+
+- If the options show their own keys (a number such as `2.` or `2`, or a letter such as `z`), press that key: `herdr agent send-keys <agent> 2`.
+- Otherwise move the highlight. Find the cursor (`❯`, `›`, `→`, `▸`, a filled `●`, or an icon character beside one option), send `Down` or `Up` once per step to reach the option, read the screen to check the highlight is on it, then send `Enter`.
+- After every key, read the screen again. When the dialog is gone or shows the next question, that answer took. When your option is highlighted and the same question still waits, send `Enter`. Never send `Enter` without checking what's highlighted.
+- Several options (checkboxes): toggle each one (its key, or `Space` with the highlight on it), check they're all ticked, then pick Submit.
+- An answer the user typed: pick the option for writing your own ("Type something", "Other", "Type your answer here"), type it with `herdr pane send-text <pane_id> "<text>"` (the agent's `pane_id`), check the screen shows it, then send `Enter`.
 
 **Message an agent that's working:** `herdr agent prompt <agent> "<text>"` queues it as its next input.
 
