@@ -174,6 +174,8 @@ class Message(unittest.TestCase):
         self.assertIn('workspace "asterism", tab "2"', message)
         self.assertIn("finished its task", message)
         self.assertIn("Tests pass. PR #12 is open.", message)
+        # The skill has no desk-alert section: the message says how to report it.
+        self.assertIn("Tell the user in a sentence or two", message)
 
     def test_blocked(self):
         message = desk_alert.alert_message(self.agent, ("asterism", None), "blocked", "Allow npm publish? 1. Yes 2. No")
