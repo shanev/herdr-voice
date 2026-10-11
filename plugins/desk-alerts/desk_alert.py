@@ -7,6 +7,10 @@ Hermes says what happened in a sentence or two, and a client watching that sessi
 the user. Agents herdr-voice handed off are skipped: Hermes already waits for those. A blocked
 agent's alert carries its screen as data, for Hark to show the question as a card.
 
+A question stays on the user's phone until its pane moves on: the agent was answered (at the desk or
+through Hermes) and went back to work, quit, or its pane closed or moved. Then Hark's hark-auth plugin
+on the gateway hears it (`POST /v1/hark/desk/resolved`) and takes the question off the phone.
+
 `desk_alert.py realert <pane>` alerts again for an agent still blocked after an answer, when its
 dialog moved on to another question.
 
@@ -45,6 +49,28 @@ DEFAULT_SETTLE_SECONDS = 20
 def is_alert(previous, status):
     """Only the end of a stretch of work is news; startup, focus and idle changes aren't."""
     return previous == "working" and status in ("done", "blocked")
+
+
+def is_resolved(previous, status):
+    """The pane's question was answered, or its agent quit (an exit reports `done`)."""
+    return previous == "blocked" and status != "blocked"
+
+
+def gone_pane(event):
+    """The pane id a closed, exited or moved pane had; None for any other event."""
+    kind = event.get("type")
+    if kind in ("pane_closed", "pane_exited"):
+        return event.get("pane_id")
+    if kind == "pane_moved":
+        # Answers name the old id, which no longer reaches the agent.
+        return event.get("previous_pane_id")
+    return None
+
+
+def forget_pane(path, pane):
+    """Drops a pane that's gone and returns its last status."""
+    with _statuses(path) as statuses:
+        return (statuses.pop(pane, None) or {}).get("status")
 
 
 def record_status(path, pane, status):
@@ -246,6 +272,17 @@ def alert_when_settled(config, pane, status, statuses, event):
     deliver(config, alert_message(agent, labels(agent), status, last_words(pane, status)))
 
 
+def resolve(config, pane):
+    """Tells Hermes' hark-auth plugin the pane's question is over. A gateway without it (404), or
+    one that's down, is skipped: the question's answer still checks the screen first."""
+    if not config["key"]:
+        return
+    try:
+        post(f"{config['url']}/v1/hark/desk/resolved", config["key"], {"pane": pane}, 10)
+    except (urllib.error.URLError, OSError) as error:
+        print(f"desk-alerts: question in {pane} not resolved on Hermes: {error}", file=sys.stderr)
+
+
 def deliver(config, message):
     """Runs the alert turn in the Desk agents session, creating the session the first time."""
     try:
@@ -266,12 +303,19 @@ def main():
                            payload["event"])
         return
     event = json.loads(os.environ.get("HERDR_PLUGIN_EVENT_JSON") or "{}").get("data") or {}
+    state = state_dir()
+    statuses = state / "statuses.json"
+    gone = gone_pane(event)
+    if gone:
+        if forget_pane(statuses, gone) == "blocked":
+            resolve(config_for(state), gone)
+        return
     pane, status = event.get("pane_id"), event.get("agent_status")
     if not pane or not status:
         return
-    state = state_dir()
-    statuses = state / "statuses.json"
     previous, event_number = record_status(statuses, pane, status)
+    if is_resolved(previous, status):
+        resolve(config_for(state), pane)
     if not is_alert(previous, status):
         return
     agent = running_agent(pane)
