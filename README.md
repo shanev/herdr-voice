@@ -2,7 +2,7 @@
 
 [![test](https://github.com/shanev/herdr-voice/actions/workflows/test.yml/badge.svg)](https://github.com/shanev/herdr-voice/actions/workflows/test.yml)
 
-Run coding agents in [herdr](https://herdr.dev) by talking to [Hermes](https://hermes-agent.nousresearch.com). Built for [Hark](https://heyhark.app), the voice app for Hermes, and works with any Hermes chat.
+Run coding agents in [herdr](https://herdr.dev) by talking to [Hermes](https://hermes-agent.nousresearch.com) or [Hark](https://heyhark.app)'s own agent. Built for Hark, the voice app for your personal agent, and works with any Hermes chat. The rest of this page says Hermes; Hark's agent does the same.
 
 ## Using it
 
@@ -48,9 +48,11 @@ On the machine where Hermes and herdr run:
 hermes skills install shanev/herdr-voice/skills/herdr-voice --category autonomous-ai-agents
 ```
 
-Hark's setup installs it for you when herdr is present. `hermes skills check` picks up updates.
+Hark's setup installs it for you when herdr is present, on Hermes or Hark's agent. `hermes skills check` picks up updates; with Hark's agent, update it from Hark's voice skills settings.
 
 ## Desk alerts
+
+Desk alerts need Hermes: Hark's agent doesn't run herdr plugins.
 
 Agents you start yourself at the desk get the same treatment, with a herdr plugin. When one finishes, or stops on a question, while you're away from the computer, the plugin has Hermes write a sentence about it in a session called "Desk agents". If you're in a conversation in Hark, it tells you at the next pause, in whichever session you're in, with a button to "Desk agents" so you can answer.
 
@@ -70,7 +72,7 @@ Hermes' gateway usually runs as a background service, not in a herdr pane. herdr
 
 Hermes' skill index keeps only the first 60 characters of a description. That's all the model sees when choosing a skill, so the description has to win against Hermes' built-in `claude-code` and `codex` skills, which run agents in tmux or one-shot. The tests enforce the limit.
 
-The `metadata.hark` block in the frontmatter is for [Hark](https://heyhark.app): a one-sentence summary, the command the skill needs, example phrases, and a routing sentence Hark adds to its instructions so Hermes picks this skill for coding agents. Hermes ignores it. The tests check its limits: summary up to 120 characters, routing up to 300, at most six phrases.
+The `metadata.hark` block in the frontmatter is for [Hark](https://heyhark.app): a one-sentence summary, the command the skill needs, the agent capabilities it needs (`background_tasks` for its hand-offs, `memory` for the choices it saves), example phrases, and a routing sentence Hark adds to its instructions so Hermes picks this skill for coding agents. Hermes ignores it, and Hark marks the skill on an agent that lacks one of those capabilities. The tests check its limits: summary up to 120 characters, routing up to 300, at most six phrases.
 
 ## Running the tests
 

@@ -7,6 +7,9 @@ metadata:
     summary: "Start, check and steer Claude Code, Codex and other coding agents in Herdr."
     requires:
       command: herdr
+      capabilities:
+        - background_tasks
+        - memory
     phrases:
       - "new Claude session for hark"
       - "what's waiting on me?"
@@ -18,11 +21,11 @@ metadata:
 
 # Herdr coding sessions, by voice
 
-The user talks to you through a voice app and is usually away from the screen. You run as the Hermes gateway, a background service on the same machine as the user's Herdr server, not inside a Herdr pane. The `herdr` CLI reaches that server through its socket from any shell, so it works from here.
+The user talks to you through a voice app and is usually away from the screen. You run as a background service on the same machine as the user's Herdr server (Hermes' gateway, or Hark's own agent), not inside a Herdr pane. The `herdr` CLI reaches that server through its socket from any shell, so it works from here.
 
 ## You're outside Herdr, and that's expected
 
-Don't check `HERDR_ENV` or ask to be moved into a Herdr pane: the user set Hermes up to control Herdr from outside. Stay out of their way instead:
+Don't check `HERDR_ENV` or ask to be moved into a Herdr pane: the user set you up to control Herdr from outside. Stay out of their way instead:
 
 - Address an agent by its `pane_id` from `herdr agent list` (`w1P:p8`), or by its `name` if it has one; never by focus. `<agent>` below means either. Pass `--no-focus` when creating workspaces or tabs.
 - Never run `focus`, `attach`, bare `herdr`, `herdr server stop`, or close a workspace or agent you didn't start, unless the user asks. Asking to see an agent counts: see **Show me an agent**.
@@ -85,6 +88,8 @@ Read each idle or done agent's last reply with `python3 ${HERMES_SKILL_DIR}/scri
    # With permission prompts on, or for an agent without such a flag, leave out everything from `--` on.
    ```
 
+   Run it with the shell tool's `timeout=90`: some agents stop shell commands after 60 seconds by default.
+
    Prompts-off flags: claude `--dangerously-skip-permissions`, codex `--yolo`, omp `--auto-approve`, grok `--always-approve`, hermes `--yolo`, opencode `--auto`, cursor `--force`; pi has no approval prompts, so it needs none. For any other kind, read its executable's `--help` once and use the flag that auto-approves all tool calls (names like `--yolo`, `--dangerously-…`, `--always-approve`, `--auto-approve`). If there's no such flag, start it without one and tell the user it may stop to ask.
 
 6. **Keep the name:** never clear it. Herdr's sidebar shows it under "asterism · 2" instead of the agent's kind, and from then on it's how you and the user refer to the agent.
@@ -116,13 +121,13 @@ If `agent start` fails with `agent_not_ready` (blocked during startup), read the
 
 2. If it's already `done` or `idle`, read the result now (below). If it's `blocked`, handle it as below. Otherwise hand the waiting to a background subagent with `delegate_task`; its result comes back to this conversation by itself when the agent finishes. Give it this goal, with `<agent>` filled in:
 
-   > Wait for the Herdr coding agent `<agent>` to finish. Run `herdr agent wait <agent> --until done --until idle --until blocked --timeout 540000` with the terminal tool's `timeout=560`, and run it again while the agent is still `working`. Never `sleep` and poll. Then run `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>`; if it exits with status 3, run `herdr agent read <agent> --source recent-unwrapped --lines 200` and take only the agent's last message. If the agent is `blocked`, read the screen with `herdr agent read <agent> --source visible` and report the question it asks. Also look at the coding agent's status line at the bottom of `herdr agent read <agent> --source visible` and report the spend and context percentage if it shows them. If the reply says it's still waiting on a command it started in the background, the task isn't finished: run `herdr agent wait <agent> --until working --timeout 540000`, then wait for it to finish again as above. Don't send the agent anything. Report the agent's final state and its last reply or question, word for word.
+   > Wait for the Herdr coding agent `<agent>` to finish. Run `herdr agent wait <agent> --until done --until idle --until blocked --timeout 540000` with the shell tool's `timeout=560`, and run it again while the agent is still `working`. Never `sleep` and poll. Then run `python3 ${HERMES_SKILL_DIR}/scripts/last_reply.py <agent>`; if it exits with status 3, run `herdr agent read <agent> --source recent-unwrapped --lines 200` and take only the agent's last message. If the agent is `blocked`, read the screen with `herdr agent read <agent> --source visible` and report the question it asks. Also look at the coding agent's status line at the bottom of `herdr agent read <agent> --source visible` and report the spend and context percentage if it shows them. If the reply says it's still waiting on a command it started in the background, the task isn't finished: run `herdr agent wait <agent> --until working --timeout 540000`, then wait for it to finish again as above. Don't send the agent anything. Report the agent's final state and its last reply or question, word for word.
 
 3. After the `delegate_task` call, tell the user it's started and that you'll tell them when it's done ("Claude's on it in asterism 2. I'll tell you when it's done."), then end your turn. Everything you write is spoken, so that sentence is said once, there: between sending the task and the `delegate_task` call, write nothing, and don't say before the call that the agent is on it. Don't run `herdr agent wait`, read the screen or check files yourself after sending a task, even for a task that looks quick: the user is talking to you and hears nothing while you wait.
 
 4. When the subagent's result arrives, report it as in "Reporting back by voice" below, naming the agent the way Herdr's sidebar shows it. If the agent is blocked, tell the user its question in one sentence.
 
-Wait in your own turn instead only when the user asks you to ("do it and wait", "stay on it"): `herdr agent prompt <agent> "<task>" --wait --until done --until idle --until blocked --timeout 540000`, with the terminal tool's `timeout=560` (its foreground limit is 600 seconds). If that wait times out while the agent is still `working`, say it's still going and what it's doing, in one sentence from the latest output, then wait again with `herdr agent wait`.
+Wait in your own turn instead only when the user asks you to ("do it and wait", "stay on it"): `herdr agent prompt <agent> "<task>" --wait --until done --until idle --until blocked --timeout 540000`, with the shell tool's `timeout=560` (Hermes and Hark's agent both cap it at 600 seconds). If that wait times out while the agent is still `working`, say it's still going and what it's doing, in one sentence from the latest output, then wait again with `herdr agent wait`.
 
 **Tell me when it's done** ("let me know when asterism 2 finishes"): mark it as yours (the `touch` line above), start the same background subagent for that agent, even one you didn't start, and tell the user you will.
 
@@ -138,7 +143,7 @@ Wait in your own turn instead only when the user asks you to ("do it and wait", 
 
 **Merge a PR** ("merge it once CI passes"): find the PR as in **Review a PR**. The first time, check your memory for the user's merge choice. If there's none, ask once: "I'll squash-merge it once the checks pass. Should I merge PRs like that from now on without checking with you first?" Save the answer to memory. If they want to be asked, confirm every merge before handing it off. Then hand off the wait with `delegate_task`, giving it this goal with `<number>` and `<repo_path>` filled in:
 
-> Merge PR #<number> once its checks pass. In `<repo_path>`, run `gh pr checks <number> --watch --fail-fast --interval 30` with the terminal tool's `timeout=560`, and run it again while checks are still pending. Never `sleep` and poll. If every check passed, run `gh pr merge <number> --squash` and report whether it merged. If any check failed, or no checks are reported, don't merge: report which checks failed, from `gh pr checks <number>`, or that there were none. Report any error from `gh` word for word.
+> Merge PR #<number> once its checks pass. In `<repo_path>`, run `gh pr checks <number> --watch --fail-fast --interval 30` with the shell tool's `timeout=560`, and run it again while checks are still pending. Never `sleep` and poll. If every check passed, run `gh pr merge <number> --squash` and report whether it merged. If any check failed, or no checks are reported, don't merge: report which checks failed, from `gh pr checks <number>`, or that there were none. Report any error from `gh` word for word.
 
 Tell the user you'll merge it when the checks pass and let them know. When the result arrives, say whether it merged, or which check failed. If it merged from a worktree, offer the cleanup in **Worktrees**.
 
