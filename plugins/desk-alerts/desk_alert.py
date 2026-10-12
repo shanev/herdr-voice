@@ -237,7 +237,7 @@ def running_agent(pane):
 
 
 def labels(agent):
-    """The agent's workspace and tab labels, and its pane's label if the user gave it one. A hook's own
+    """The agent's workspace and tab labels, and its pane's label if it has one. A hook's own
     context describes the focused pane, which may be another one."""
     def get(kind, key):
         code, out = herdr(kind, "get", agent.get(key) or "")
@@ -246,7 +246,7 @@ def labels(agent):
         except (json.JSONDecodeError, KeyError, TypeError):
             return {}
     pane = get("pane", "pane_id")
-    # A pane's label is its terminal title until `herdr pane rename` sets one.
+    # A pane's label is its terminal title until `herdr pane rename` (the user, or a plugin such as Auto Title) sets one.
     pane_label = pane.get("label") if pane.get("label") != pane.get("terminal_title_stripped") else None
     return get("workspace", "workspace_id").get("label") or agent.get("workspace_id") or "?", get("tab", "tab_id").get("label"), pane_label
 

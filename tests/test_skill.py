@@ -142,7 +142,7 @@ class Recipes(unittest.TestCase):
 
     def test_names_agents_by_label_not_pane_id(self):
         section = TEXT.split("**What's running:**")[1].split("\n**")[0]
-        # A pane's label is its terminal title until the user renames it.
+        # A pane's label is its terminal title until it's renamed.
         for needle in ("pane's label", "`terminal_title_stripped`", "Never say a `pane_id` to the user"):
             self.assertIn(needle, section)
 
