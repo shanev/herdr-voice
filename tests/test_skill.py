@@ -60,7 +60,10 @@ class Frontmatter(unittest.TestCase):
         hark = frontmatter()["metadata"]["hark"]
         self.assertIs(hark["voice"], True)
         self.assertLessEqual(len(hark["summary"]), 120)
-        self.assertEqual(hark["requires"], {"command": "herdr"})
+        self.assertEqual(hark["requires"]["command"], "herdr")
+        # Hand-offs need delegate_task, and the permission and merge choices need memory
+        # (heyhark docs/voice-extension.md, section 1). Hark marks the skill on an agent without them.
+        self.assertEqual(hark["requires"]["capabilities"], ["background_tasks", "memory"])
         self.assertLessEqual(len(hark["phrases"]), 6)
         self.assertTrue(all(hark["phrases"]))
         self.assertLessEqual(len(hark["routing"]), 300)
@@ -170,10 +173,19 @@ class Recipes(unittest.TestCase):
         self.assertIn("only when the user asks", show)
         self.assertEqual(TEXT.count("herdr agent focus"), 1)
 
-    def test_waits_fit_hermes_terminal_limit(self):
-        # Hermes' foreground terminal limit is 600 s.
-        for ms in re.findall(r"--timeout (\d+)", TEXT):
-            self.assertLess(int(ms), 600_000)
+    def test_waits_fit_the_shell_limits(self):
+        # Hermes and hark-agent both cap a shell command at 600 s; hark-agent stops one after 60 s
+        # unless the model passes a longer timeout, so a herdr wait of 60 s or more names one.
+        for line in TEXT.splitlines():
+            for ms in re.findall(r"--timeout (\d+)", line):
+                self.assertLess(int(ms), 600_000)
+                if int(ms) >= 60_000:
+                    self.assertRegex(line + TEXT.split(line, 1)[1][:400], r"shell tool's `timeout=\d+`")
+
+    def test_not_tied_to_hermes(self):
+        # herdr-voice also runs in hark-agent, Hark's own agent.
+        self.assertNotIn("You run as the Hermes gateway", TEXT)
+        self.assertNotIn("terminal tool", TEXT)
 
 
 if __name__ == "__main__":
