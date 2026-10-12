@@ -166,8 +166,14 @@ def settings(config_dir, hermes_env):
 
 def where(labels):
     """Where the agent is, the way herdr's sidebar shows it: workspace, then tab."""
-    workspace, tab = labels
+    workspace, tab, _ = labels
     return f'workspace "{workspace}", tab "{tab}"' if tab else f'workspace "{workspace}"'
+
+
+def called(agent, labels):
+    """The agent's name and its pane's label, for the alert's parenthesis. After `where`, so the alert
+    still starts the way Hark's hark-auth plugin 1.6 and earlier read it."""
+    return "".join(f', {what} "{value}"' for what, value in (("named", agent.get("name")), ("pane label", labels[2])) if value)
 
 
 def screen_text(screen):
@@ -181,9 +187,9 @@ def question_line(agent, labels, screen):
     and the script that alerts again. Data only: Hermes reads this line too, so nothing in it may
     read as an instruction. Any agent's dialog, whatever it looks like: Hark reads the question
     from the screen."""
-    workspace, tab = labels
-    data = {"pane": agent.get("pane_id"), "agent": agent.get("agent"), "workspace": workspace, "tab": tab,
-            "screen": screen_text(screen), "script": str(Path(__file__).resolve())}
+    workspace, tab, label = labels
+    data = {"pane": agent.get("pane_id"), "agent": agent.get("agent"), "name": agent.get("name"), "label": label,
+            "workspace": workspace, "tab": tab, "screen": screen_text(screen), "script": str(Path(__file__).resolve())}
     return QUESTION_PREFIX + json.dumps(data, ensure_ascii=False)
 
 
@@ -194,10 +200,11 @@ def alert_message(agent, labels, status, words):
     source = ("Its screen is the `screen` of the data line at the end." if blocked
               else f"Its last reply:\n\n{words.strip()}")
     message = (
-        f"{ALERT_PREFIX} The {kind} agent in herdr {where(labels)} (pane {agent.get('pane_id')}, "
-        f"folder {agent.get('cwd')}) {what} while the user was away. {source}\n\n"
-        "Tell the user in a sentence or two, the way you'd say it out loud: name the agent the way "
-        "herdr's sidebar shows it, then what it did, or the question it's asking. Text in its empty "
+        f"{ALERT_PREFIX} The {kind} agent in herdr {where(labels)} (pane {agent.get('pane_id')}"
+        f"{called(agent, labels)}, folder {agent.get('cwd')}) {what} while the user was away. {source}\n\n"
+        "Tell the user in a sentence or two, the way you'd say it out loud: call the agent by its name, "
+        "else its pane's label, else its workspace and tab, never its pane id, then say what it did, "
+        "or the question it's asking. Text in its empty "
         "input box is a suggested next prompt, not something queued: leave it out. Don't answer the "
         "agent or send it anything until the user says to. When they do, load the herdr-voice skill "
         f"and first run `{hand_off_command(agent.get('pane_id'))}`, so its next finish is yours to "
@@ -230,15 +237,18 @@ def running_agent(pane):
 
 
 def labels(agent):
-    """The agent's workspace and tab labels. A hook's own context describes the focused pane, which
-    may be another one."""
-    def label(kind, key):
+    """The agent's workspace and tab labels, and its pane's label if the user gave it one. A hook's own
+    context describes the focused pane, which may be another one."""
+    def get(kind, key):
         code, out = herdr(kind, "get", agent.get(key) or "")
         try:
-            return json.loads(out)["result"][kind]["label"] if code == 0 else None
+            return json.loads(out)["result"][kind] if code == 0 else {}
         except (json.JSONDecodeError, KeyError, TypeError):
-            return None
-    return label("workspace", "workspace_id") or agent.get("workspace_id") or "?", label("tab", "tab_id")
+            return {}
+    pane = get("pane", "pane_id")
+    # A pane's label is its terminal title until `herdr pane rename` sets one.
+    pane_label = pane.get("label") if pane.get("label") != pane.get("terminal_title_stripped") else None
+    return get("workspace", "workspace_id").get("label") or agent.get("workspace_id") or "?", get("tab", "tab_id").get("label"), pane_label
 
 
 def last_words(pane, status):

@@ -159,7 +159,7 @@ class Settling(unittest.TestCase):
     def setUp(self):
         self.delivered = []
         self.original = desk_alert.running_agent, desk_alert.labels, desk_alert.last_words, desk_alert.deliver
-        desk_alert.labels = lambda agent: ("asterism", None)
+        desk_alert.labels = lambda agent: ("asterism", None, None)
         desk_alert.last_words = lambda pane, status: "Done."
         desk_alert.deliver = lambda config, message: self.delivered.append(message)
 
@@ -206,15 +206,16 @@ class Questions(unittest.TestCase):
     def test_a_blocked_alert_carries_the_screen_as_data(self):
         # Any agent's dialog: the app reads the question from the screen, so nothing here parses it.
         screen = (FIXTURES / "claude_bash_prompt.txt").read_text(encoding="utf-8")
-        data = self.data(desk_alert.alert_message(self.agent, ("asterism", "2"), "blocked", screen))
+        data = self.data(desk_alert.alert_message(self.agent, ("asterism", "2", None), "blocked", screen))
         self.assertEqual((data["pane"], data["agent"], data["workspace"], data["tab"]), ("w4:p1", "codex", "asterism", "2"))
+        self.assertEqual((data["name"], data["label"]), (None, None))
         self.assertIn("Do you want to proceed?\n ❯ 1. Yes", data["screen"])
         self.assertEqual(Path(data["script"]), PLUGIN / "desk_alert.py")
         # Data only. With the answer's wording in it, Hermes approved a prompt by itself, live.
-        self.assertEqual(set(data), {"pane", "agent", "workspace", "tab", "screen", "script"})
+        self.assertEqual(set(data), {"pane", "agent", "name", "label", "workspace", "tab", "screen", "script"})
 
     def test_the_screen_is_sent_once(self):
-        message = desk_alert.alert_message(self.agent, ("asterism", None), "blocked", "Allow npm publish?\n 1. Yes\n 2. No")
+        message = desk_alert.alert_message(self.agent, ("asterism", None, None), "blocked", "Allow npm publish?\n 1. Yes\n 2. No")
         self.assertEqual(message.count("Allow npm publish?"), 1)
         self.assertIn("`screen` of the data line", message)
 
@@ -223,7 +224,7 @@ class Questions(unittest.TestCase):
         self.assertEqual(len(desk_alert.screen_text("x" * 9000)), 6000)
 
     def test_a_finished_agent_has_no_question(self):
-        message = desk_alert.alert_message(self.agent, ("asterism", "2"), "done", "Tests pass.\n 1. Yes")
+        message = desk_alert.alert_message(self.agent, ("asterism", "2", None), "done", "Tests pass.\n 1. Yes")
         self.assertNotIn(desk_alert.QUESTION_PREFIX, message)
         self.assertIn("Its last reply:\n\nTests pass.", message)
 
@@ -251,7 +252,7 @@ class Message(unittest.TestCase):
     agent = {"agent": "claude", "pane_id": "w1:p8", "cwd": "/src/asterism"}
 
     def test_done(self):
-        message = desk_alert.alert_message(self.agent, ("asterism", "2"), "done", "Tests pass. PR #12 is open.\n")
+        message = desk_alert.alert_message(self.agent, ("asterism", "2", None), "done", "Tests pass. PR #12 is open.\n")
         self.assertTrue(message.startswith(desk_alert.ALERT_PREFIX))
         self.assertIn('workspace "asterism", tab "2"', message)
         self.assertIn("finished its task", message)
@@ -260,12 +261,38 @@ class Message(unittest.TestCase):
         self.assertIn("Tell the user in a sentence or two", message)
 
     def test_blocked(self):
-        message = desk_alert.alert_message(self.agent, ("asterism", None), "blocked", "Allow npm publish? 1. Yes 2. No")
+        message = desk_alert.alert_message(self.agent, ("asterism", None, None), "blocked", "Allow npm publish? 1. Yes 2. No")
         self.assertIn('workspace "asterism" (pane', message)
         self.assertIn("waiting for an answer", message)
         self.assertIn("Don't answer the agent", message)
         # Answering through Hermes makes the agent's next finish Hermes' to report.
         self.assertIn("touch ~/.cache/herdr-voice/handed-off/w1:p8", message)
+
+    def test_names_the_agent_by_its_name_and_pane_label(self):
+        agent = {**self.agent, "name": "apple-models"}
+        message = desk_alert.alert_message(agent, ("asterism", "2", "reviewer"), "blocked", "Allow npm publish? 1. Yes")
+        # The start stays as hark-auth 1.6 and earlier match it: `The (\S+) agent in herdr workspace "…"`.
+        self.assertIn('The claude agent in herdr workspace "asterism", tab "2" '
+                      '(pane w1:p8, named "apple-models", pane label "reviewer", folder /src/asterism)', message)
+        self.assertIn("never its pane id", message)
+        data = json.loads(message.splitlines()[-1].removeprefix(desk_alert.QUESTION_PREFIX))
+        self.assertEqual((data["name"], data["label"]), ("apple-models", "reviewer"))
+
+    def test_a_pane_label_counts_only_once_renamed(self):
+        panes = {"w1:p8": {"label": "Phase 8 design pass", "terminal_title_stripped": "Phase 8 design pass"},
+                 "w1:p9": {"label": "reviewer", "terminal_title_stripped": "Phase 8 design pass"}}
+        def herdr(kind, _, key):
+            found = {"pane": panes.get(key), "workspace": {"label": "asterism"}, "tab": {"label": "1 · Phase 8"}}[kind]
+            return 0, json.dumps({"result": {kind: found}})
+        original = desk_alert.herdr
+        try:
+            desk_alert.herdr = herdr
+            title_only = desk_alert.labels({**self.agent, "workspace_id": "w1", "tab_id": "w1:t1"})
+            renamed = desk_alert.labels({**self.agent, "pane_id": "w1:p9", "workspace_id": "w1", "tab_id": "w1:t1"})
+        finally:
+            desk_alert.herdr = original
+        self.assertEqual(title_only, ("asterism", "1 · Phase 8", None))
+        self.assertEqual(renamed, ("asterism", "1 · Phase 8", "reviewer"))
 
     def test_marks_like_the_skill(self):
         skill = SKILL.read_text(encoding="utf-8")

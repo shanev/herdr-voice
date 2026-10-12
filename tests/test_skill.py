@@ -137,7 +137,13 @@ class Recipes(unittest.TestCase):
     def test_recall_search_is_read_only(self):
         self.assertIn("**Where did we do this**", TEXT)
         section = TEXT.split("\n**Where did we do this**")[1].split("\n**")[0]
-        for needle in ("agent_session", "~/.claude/projects/", "grep -l", "pane_id", "read-only"):
+        for needle in ("agent_session", "~/.claude/projects/", "grep -l", "named as in **What's running**", "read-only"):
+            self.assertIn(needle, section)
+
+    def test_names_agents_by_label_not_pane_id(self):
+        section = TEXT.split("**What's running:**")[1].split("\n**")[0]
+        # A pane's label is its terminal title until the user renames it.
+        for needle in ("pane's label", "`terminal_title_stripped`", "Never say a `pane_id` to the user"):
             self.assertIn(needle, section)
 
     def test_voice_vocabulary_maps_to_recipes(self):
