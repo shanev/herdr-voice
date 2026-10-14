@@ -70,6 +70,30 @@ class Frontmatter(unittest.TestCase):
         self.assertIn("herdr-voice", hark["routing"])
 
 
+    def test_declares_its_workspaces_and_agents_to_hark(self):
+        # The voice extension's section 8: Hark's agent runs these, in this folder, without a shell, and shows a
+        # page per workspace with its agents. Each command must name a script that's here.
+        hark = frontmatter()["metadata"]["hark"]
+        for command, word in [(hark["contexts"]["list"], "contexts"), (hark["contexts"]["create"], "create"),
+                              (hark["items"]["list"], "items")]:
+            self.assertEqual(command, ["python3", "scripts/hark_state.py", word])
+            self.assertTrue((SKILL.parent / command[1]).exists())
+        scope = hark["contexts"]["scope"]
+        self.assertLessEqual(len(scope), 300)
+        for placeholder in ("{name}", "{location}", "{id}"):
+            self.assertIn(placeholder, scope)
+        self.assertNotIn("{", scope.replace("{name}", "").replace("{location}", "").replace("{id}", ""))
+        self.assertTrue(set(hark["items"]["push"]) <= {"working", "waiting", "done", "failed", "idle"})
+        self.assertEqual(hark["items"]["push"], ["waiting", "done"])
+
+    def test_takes_the_workspace_from_the_run(self):
+        # Hark scopes a workspace's page with the scope sentence; the skill must use it instead of guessing.
+        self.assertIn("## Hark", TEXT)
+        section = TEXT.split("## Hark")[1].split("\n## ")[0]
+        for needle in ("instructions", "--machine <location>", "[Card answer]", "[Card result]", "scripts/hark_state.py realert"):
+            self.assertIn(needle, section)
+
+
 class HermesScannerFriendly(unittest.TestCase):
     # Hermes' skills guard blocks an install on these tokens even in prose that forbids them.
     def test_no_blocked_tokens(self):
