@@ -5,7 +5,8 @@ Hark doesn't poll the agent: every change it shows (an agent detected or gone, e
 exited or moved, a workspace made, closed, renamed or moved) is reported at once with `"push": false`, for Hark's open
 event stream only. On `pane.agent_status_changed`, an agent that goes from working to done or blocked while the user
 is away from the computer is also news for a push, once settled. The hook tells the agent (Hermes with Hark's hark-auth plugin 1.8 or later, else Hark's own agent)
-that the agent's workspace changed: `POST /v1/skills/herdr-voice/changed` with the workspace and pane. The agent reads
+that the agent's workspace changed: `POST /v1/skills/herdr-voice/changed` with the workspace and pane. Every agent on
+the machine is told (Hermes and Hark's agent both serve Hark a stream); only the first may push. The agent reads
 the workspace's agents with the skill's `scripts/hark_state.py` and pushes the change to the user's phone, with the
 question card of a blocked agent. Agents herdr-voice handed off are skipped: Hermes already waits for those.
 
@@ -18,8 +19,8 @@ another question.
 
 Settings, all optional, in this plugin's config dir `.env` (`herdr plugin config-dir herdr-voice.desk-alerts`):
 AWAY_AFTER_MINUTES (default 5; 0 alerts even at the desk), SETTLE_SECONDS (default 20), HERMES_API_URL and
-HERMES_API_KEY (default: Hermes' own API_SERVER_PORT and API_SERVER_KEY in ~/.hermes/.env, else Hark's agent's PORT and
-key in ~/.hark-agent). Stdlib only.
+HERMES_API_KEY (an agent to tell first, besides Hermes (API_SERVER_PORT and API_SERVER_KEY in ~/.hermes/.env) and Hark's
+agent (PORT and key in ~/.hark-agent), each told when it's there). Stdlib only.
 """
 import fcntl
 import json
@@ -194,23 +195,29 @@ def read_key(path):
 
 
 def settings(config_dir, hermes_env, hark_agent=HARK_AGENT):
+    """Every agent on the machine, each serving Hark its own stream: one named in this plugin's `.env` first, then
+    Hermes, then Hark's own agent, each once."""
     own, hermes = read_env_file(Path(config_dir) / ".env"), read_env_file(hermes_env)
-    port = hermes.get("API_SERVER_PORT") or DEFAULT_PORT
-    key = own.get("HERMES_API_KEY") or hermes.get("API_SERVER_KEY") or ""
-    url = own.get("HERMES_API_URL") or f"http://127.0.0.1:{port}"
-    if not key and read_key(Path(hark_agent) / "agent-key"):
-        # No Hermes here: Hark's own agent, which runs the skill too.
-        key = read_key(Path(hark_agent) / "agent-key")
-        url = own.get("HERMES_API_URL") or "http://127.0.0.1:{}".format(
-            read_env_file(Path(hark_agent) / "env").get("PORT") or DEFAULT_HARK_AGENT_PORT)
+    agents = []
+    hermes_key = hermes.get("API_SERVER_KEY") or ""
+    if own.get("HERMES_API_URL") and (own.get("HERMES_API_KEY") or hermes_key):
+        agents.append({"url": own["HERMES_API_URL"], "key": own.get("HERMES_API_KEY") or hermes_key})
+    if hermes_key:
+        agents.append({"url": "http://127.0.0.1:{}".format(hermes.get("API_SERVER_PORT") or DEFAULT_PORT), "key": hermes_key})
+    agent_key = read_key(Path(hark_agent) / "agent-key")
+    if agent_key:
+        agents.append({"url": "http://127.0.0.1:{}".format(
+            read_env_file(Path(hark_agent) / "env").get("PORT") or DEFAULT_HARK_AGENT_PORT), "key": agent_key})
+    seen = set()
+    agents = [a for a in ({"url": a["url"].rstrip("/"), "key": a["key"]} for a in agents)
+              if not (a["url"] in seen or seen.add(a["url"]))]
     def number(key, default):
         try:
             return float(own.get(key, default))
         except ValueError:
             return default
     return {
-        "url": url.rstrip("/"),
-        "key": key,
+        "agents": agents,
         "away_after_minutes": number("AWAY_AFTER_MINUTES", DEFAULT_AWAY_MINUTES),
         "settle_seconds": number("SETTLE_SECONDS", DEFAULT_SETTLE_SECONDS),
     }
@@ -259,15 +266,18 @@ def changed(config, workspace, pane=None, push=True):
     """Tells Hark's agent the workspace changed (the pane's agent in it, if given), or, without a workspace, which
     workspaces there are: it reads them again and sends them to Hark's open stream, or, while Hark is closed, pushes
     or withdraws what's new. `push=False` is for the stream only (the agent still withdraws a question that's over).
-    An agent without skill state (404), or one that's down, is skipped."""
-    if not config["key"] or (pane and not workspace):
+    Every agent on the machine is told, since each serves Hark its own stream; only the first may push, so a phone paired
+    with two isn't told twice. An agent without skill state (404), or one that's down, is skipped, and the rest are
+    still told."""
+    if pane and not workspace:
         return
-    body = {**({"context": workspace} if workspace else {}), **({"item": pane} if pane else {}),
-            **({} if push else {"push": False})}
-    try:
-        post(f"{config['url']}/v1/skills/{SKILL}/changed", config["key"], body, 60)
-    except (urllib.error.URLError, OSError) as error:
-        print(f"desk-alerts: {workspace} {pane or ''} not reported to the agent: {error}", file=sys.stderr)
+    where = {**({"context": workspace} if workspace else {}), **({"item": pane} if pane else {})}
+    for index, agent in enumerate(config["agents"]):
+        body = {**where, **({} if push and index == 0 else {"push": False})}
+        try:
+            post(f"{agent['url']}/v1/skills/{SKILL}/changed", agent["key"], body, 60)
+        except (urllib.error.URLError, OSError) as error:
+            print(f"desk-alerts: {workspace or 'workspaces'} {pane or ''} not reported to {agent['url']}: {error}", file=sys.stderr)
 
 
 def main():
@@ -315,7 +325,7 @@ def main():
     changed(config, workspace, pane, push=resolved)
     if not alert or agent is None or take_hand_off([pane, agent.get("name")], time.time()):
         return
-    if not config["key"]:
+    if not config["agents"]:
         print("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.hark-agent/agent-key)", file=sys.stderr)
         return
     ioreg = subprocess.run(["ioreg", "-c", "IOHIDSystem"], capture_output=True, text=True).stdout \
@@ -349,7 +359,7 @@ def realert(pane):
     change between two questions of one dialog, so the hook alone never would."""
     state = state_dir()
     config = config_for(state)
-    if not config["key"]:
+    if not config["agents"]:
         sys.exit("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.hark-agent/agent-key)")
     deliver_detached(state, config, pane, "blocked", latest_event(state / "statuses.json", pane))
     print("The next question will come as a new alert.")

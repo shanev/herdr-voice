@@ -58,7 +58,7 @@ class Hook(unittest.TestCase):
                 for pane, status in statuses:
                     desk_alert.record_status(state / "statuses.json", pane, status)
                 desk_alert.state_dir = lambda: state
-                desk_alert.config_for = lambda state: {"key": "k", "url": "http://hermes"}
+                desk_alert.config_for = lambda state: {"agents": [{"key": "k", "url": "http://hermes"}]}
                 desk_alert.post = lambda url, key, body, timeout: sent.append((url, body))
                 # An agent back at work or done at the desk isn't away news here.
                 desk_alert.running_agent = lambda pane: None
@@ -109,7 +109,7 @@ class Resolved(Hook):
         original = desk_alert.post
         desk_alert.post = refuse
         try:
-            desk_alert.changed({"key": "k", "url": "http://hermes"}, "w1", "w1:p1")
+            desk_alert.changed({"agents": [{"key": "k", "url": "http://hermes"}]}, "w1", "w1:p1")
         finally:
             desk_alert.post = original
 
@@ -154,7 +154,7 @@ class Alerting(unittest.TestCase):
             with tempfile.TemporaryDirectory() as folder:
                 state = Path(folder)
                 desk_alert.state_dir = lambda: state
-                desk_alert.config_for = lambda state: {"key": "k", "url": "http://hermes", "away_after_minutes": 0,
+                desk_alert.config_for = lambda state: {"agents": [{"key": "k", "url": "http://hermes"}], "away_after_minutes": 0,
                                                        "settle_seconds": 0}
                 agent = {"agent": "claude", "pane_id": "w1:p1", "workspace_id": "w1", "agent_status": "blocked"}
                 desk_alert.running_agent = lambda pane: agent
@@ -256,26 +256,71 @@ class Settings(unittest.TestCase):
             folder = Path(folder)
             hermes = folder / "hermes.env"
             hermes.write_text('API_SERVER_KEY="secret"\nAPI_SERVER_PORT=9000\n', encoding="utf-8")
-            self.assertEqual(desk_alert.settings(folder, hermes),
-                             {"url": "http://127.0.0.1:9000", "key": "secret", "away_after_minutes": 5, "settle_seconds": 20})
+            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-hark-agent"),
+                             {"agents": [{"url": "http://127.0.0.1:9000", "key": "secret"}], "away_after_minutes": 5,
+                              "settle_seconds": 20})
             (folder / ".env").write_text("# mine\nexport AWAY_AFTER_MINUTES=0\nSETTLE_SECONDS=2\nHERMES_API_URL=https://mac.example/\n",
                                          encoding="utf-8")
-            self.assertEqual(desk_alert.settings(folder, hermes),
-                             {"url": "https://mac.example", "key": "secret", "away_after_minutes": 0, "settle_seconds": 2})
+            # An agent of your own is told too, first, with Hermes' key unless you give one.
+            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-hark-agent"),
+                             {"agents": [{"url": "https://mac.example", "key": "secret"}, {"url": "http://127.0.0.1:9000", "key": "secret"}],
+                              "away_after_minutes": 0, "settle_seconds": 2})
+            (folder / ".env").write_text("HERMES_API_URL=http://127.0.0.1:9000\nHERMES_API_KEY=other\n", encoding="utf-8")
+            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-hark-agent")["agents"],
+                             [{"url": "http://127.0.0.1:9000", "key": "other"}])
 
-    def test_hark_agent_without_hermes(self):
+    def test_every_agent_on_the_machine(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
             agent = folder / ".hark-agent"
             agent.mkdir()
             (agent / "agent-key").write_text("agent-secret\n", encoding="utf-8")
             (agent / "env").write_text("PORT=8650\nWORKSPACE='/Users/me'\n", encoding="utf-8")
-            self.assertEqual(desk_alert.settings(folder, folder / "no-hermes.env", agent),
-                             {"url": "http://127.0.0.1:8650", "key": "agent-secret", "away_after_minutes": 5, "settle_seconds": 20})
-            # With Hermes too, Hermes is told: one push per change.
+            self.assertEqual(desk_alert.settings(folder, folder / "no-hermes.env", agent)["agents"],
+                             [{"url": "http://127.0.0.1:8650", "key": "agent-secret"}])
+            # Hermes and Hark's agent on one Mac: both are told, Hermes first.
             hermes = folder / "hermes.env"
             hermes.write_text("API_SERVER_KEY=secret\n", encoding="utf-8")
-            self.assertEqual(desk_alert.settings(folder, hermes, agent)["key"], "secret")
+            self.assertEqual(desk_alert.settings(folder, hermes, agent)["agents"],
+                             [{"url": "http://127.0.0.1:8642", "key": "secret"}, {"url": "http://127.0.0.1:8650", "key": "agent-secret"}])
+            self.assertEqual(desk_alert.settings(folder, folder / "no-hermes.env", folder / "none")["agents"], [])
+
+
+class EveryAgent(unittest.TestCase):
+    """Each agent on the machine serves Hark its own stream, so each hears of every change; only the first may push it,
+    so a phone paired with both isn't told twice."""
+
+    AGENTS = {"agents": [{"url": "http://hermes", "key": "h"}, {"url": "http://hark-agent", "key": "a"}]}
+
+    def run_changed(self, *args, fail=()):
+        sent = []
+        def post(url, key, body, timeout):
+            sent.append((url, key, body))
+            if url.startswith(fail):
+                raise desk_alert.urllib.error.URLError("down")
+        original = desk_alert.post
+        desk_alert.post = post
+        try:
+            desk_alert.changed(self.AGENTS, *args)
+        finally:
+            desk_alert.post = original
+        return sent
+
+    def test_a_stream_change_goes_to_every_agent(self):
+        self.assertEqual(self.run_changed("w1", "w1:p1", False), [
+            ("http://hermes/v1/skills/herdr-voice/changed", "h", {"context": "w1", "item": "w1:p1", "push": False}),
+            ("http://hark-agent/v1/skills/herdr-voice/changed", "a", {"context": "w1", "item": "w1:p1", "push": False})])
+        self.assertEqual([body for _, _, body in self.run_changed(None, None, False)], [{"push": False}, {"push": False}])
+
+    def test_only_the_first_agent_may_push(self):
+        self.assertEqual([(url, body) for url, _, body in self.run_changed("w1", "w1:p1")], [
+            ("http://hermes/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1"}),
+            ("http://hark-agent/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1", "push": False})])
+
+    def test_one_agent_down_doesnt_stop_the_others(self):
+        sent = self.run_changed("w1", "w1:p1", False, fail=("http://hermes",))
+        self.assertEqual([url for url, _, _ in sent], ["http://hermes/v1/skills/herdr-voice/changed",
+                                                         "http://hark-agent/v1/skills/herdr-voice/changed"])
 
 
 class Settling(unittest.TestCase):
@@ -296,7 +341,7 @@ class Settling(unittest.TestCase):
             if newer_event:
                 desk_alert.record_status(statuses, "w1:p1", "working")
                 desk_alert.record_status(statuses, "w1:p1", "done")
-            desk_alert.alert_when_settled({"settle_seconds": 0, "key": "k", "url": "http://hermes"}, "w1:p1", "done",
+            desk_alert.alert_when_settled({"settle_seconds": 0, "agents": [{"key": "k", "url": "http://hermes"}]}, "w1:p1", "done",
                                           statuses, event)
 
     def test_still_done_tells_the_agent_its_workspace_changed(self):
@@ -325,7 +370,7 @@ class Realert(unittest.TestCase):
                 desk_alert.record_status(state / "statuses.json", "w1:p1", "working")
                 desk_alert.record_status(state / "statuses.json", "w1:p1", "blocked")
                 desk_alert.state_dir = lambda: state
-                desk_alert.config_for = lambda state: {"key": "k"}
+                desk_alert.config_for = lambda state: {"agents": [{"key": "k", "url": "http://hermes"}]}
                 desk_alert.deliver_detached = lambda *args: spawned.append(args[2:])
                 desk_alert.realert("w1:p1")
         finally:
