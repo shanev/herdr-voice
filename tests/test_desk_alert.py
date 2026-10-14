@@ -143,9 +143,24 @@ class HandOffs(unittest.TestCase):
             self.assertTrue(desk_alert.take_hand_off(["w1:p1", None], now, folder))
             # The finish stays Hermes' to tell: hark_state.py gives it no result card.
             self.assertTrue((folder / "w1:p1.finished").exists())
-            # The agent's next task, typed at the desk, is alerted, and its result is the user's to hear.
-            self.assertFalse(desk_alert.take_hand_off(["w1:p1", None], now, folder))
+            # The agent's next task, typed at the desk later, is alerted, and its result is the user's to hear.
+            self.assertFalse(desk_alert.take_hand_off(["w1:p1", None], now + desk_alert.SAME_TASK_SECONDS + 1, folder))
             self.assertEqual(list(folder.iterdir()), [])
+
+    def test_a_handed_off_task_finishing_twice_stays_handed_off(self):
+        # Claude can end a reply, go back to work on what it started, and end again: one task, Hermes' to tell.
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            (folder / "w1:p1").touch()
+            now = time.time()
+            self.assertTrue(desk_alert.take_hand_off(["w1:p1", None], now, folder))
+            self.assertTrue(desk_alert.take_hand_off(["w1:p1", None], now + 60, folder))
+            self.assertTrue((folder / "w1:p1.finished").exists())
+            # Long after, a finish is a new task from the desk.
+            later = now + desk_alert.SAME_TASK_SECONDS + 120
+            os.utime(folder / "w1:p1.finished", (now + 60, now + 60))
+            self.assertFalse(desk_alert.take_hand_off(["w1:p1", None], later, folder))
+            self.assertFalse((folder / "w1:p1.finished").exists())
 
     def test_the_skills_state_script_reads_the_same_marks(self):
         spec = importlib.util.spec_from_file_location("hark_state", SKILL.parent / "scripts" / "hark_state.py")
