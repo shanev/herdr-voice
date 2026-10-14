@@ -3,6 +3,7 @@ a stand-in `herdr` on PATH that answers from recorded JSON and logs every call."
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -147,6 +148,13 @@ class HarkState(unittest.TestCase):
             # Handed off by herdr-voice: Hermes tells its result in the conversation, so no card.
             {"id": "w5M:p5", "name": "handed", "state": "done", "detail": "Tests pass"},
         ])
+
+    def test_running_leaves_the_skills_folder_as_installed(self):
+        # Hermes calls a changed file in a skill's folder a local edit and won't update the skill over it.
+        cache = SKILL_DIR / "scripts" / "__pycache__"
+        shutil.rmtree(cache, ignore_errors=True)
+        self.run_state("items")
+        self.assertFalse(cache.exists(), "running the script wrote bytecode into the skill's folder")
 
     def test_items_of_every_workspace_say_theirs(self):
         items = self.run_state("items")["items"]
