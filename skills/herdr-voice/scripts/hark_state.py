@@ -33,7 +33,9 @@ import sys
 import time
 from pathlib import Path
 
-# last_reply.py beside this script, however it's loaded.
+# last_reply.py beside this script, however it's loaded, without writing bytecode beside it: Hermes calls a new file in a
+# skill's folder a local edit and won't update the skill over it.
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from last_reply import last_reply  # noqa: E402
 
