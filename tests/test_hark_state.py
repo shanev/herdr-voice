@@ -148,20 +148,32 @@ class HarkState(unittest.TestCase):
         self.assertEqual(next(i for i in items if i["id"] == "w1P:p8")["state"], "idle")
 
     def test_create_finds_the_repo_and_opens_its_workspace_without_focus(self):
+        self.answers["|workspace list"] = result({"workspaces": [w for w in WORKSPACES if w.get("label") != "hark"]})
         self.answers["|workspace create --cwd {} --label hark --no-focus".format(self.home / "github.com/tensor-systems/hark")] = \
             result({"workspace": {"workspace_id": "wN", "label": "hark"}, "root_pane": {"pane_id": "wN:p1"}})
         made = self.run_state("create", "hark")
         self.assertEqual(made, {"context": {"id": "wN", "name": "hark", "location": os.uname().nodename.split(".")[0]}})
 
     def test_create_with_a_name_thats_no_repo_or_on_another_machine(self):
-        self.answers["|workspace create --label notes --no-focus"] = result({"workspace": {"workspace_id": "wP", "label": "notes"}})
-        self.answers["vega@vega|workspace create --label hark --no-focus"] = result({"workspace": {"workspace_id": "w7", "label": "hark"}})
+        # Not a repo: it opens in the home folder, never wherever herdr would (a checkout other agents work in).
+        self.answers[f"|workspace create --cwd {self.home} --label notes --no-focus"] = \
+            result({"workspace": {"workspace_id": "wP", "label": "notes"}})
+        self.answers["vega@vega|workspace create --label docs --no-focus"] = result({"workspace": {"workspace_id": "w7", "label": "docs"}})
         self.assertEqual(self.run_state("create", "notes")["context"]["id"], "wP")
-        self.assertEqual(self.run_state("create", "hark", "vega@vega"),
-                         {"context": {"id": "vega@vega/w7", "name": "hark", "location": "vega@vega"}})
+        self.assertEqual(self.run_state("create", "docs", "vega@vega"),
+                         {"context": {"id": "vega@vega/w7", "name": "docs", "location": "vega@vega"}})
+        # The machine as a person says it: its label's user or host part.
+        self.assertEqual(self.run_state("create", "docs", "vega")["context"]["id"], "vega@vega/w7")
         unknown = self.run_state("create", "hark", "nowhere", check=False)
         self.assertNotEqual(unknown.returncode, 0)
         self.assertIn("nowhere", unknown.stderr)
+
+    def test_create_opens_the_workspace_that_has_the_name_already(self):
+        # "Open hark on vega" when vega has a hark workspace: that one, not a second.
+        self.assertEqual(self.run_state("create", "hark", "vega"),
+                         {"context": {"id": "vega@vega/w2", "name": "hark", "location": "vega@vega"}})
+        self.assertEqual(self.run_state("create", "Hark")["context"]["id"], "w5M")
+        self.assertFalse([c for c in self.calls() if c["args"][:2] == ["workspace", "create"]], "a second workspace")
 
     def test_realert_runs_the_desk_alerts_plugin(self):
         plugin = self.folder / "plugin"

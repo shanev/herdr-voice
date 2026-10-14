@@ -110,18 +110,40 @@ def find_repo(name):
     return None
 
 
+def machine_named(said):
+    """The saved machine a person means: its label, or the user or host part of one like vega@vega."""
+    labels = machines()
+    if said in labels:
+        return said
+    return next((label for label in labels if said in label.split("@")), None)
+
+
 def create(name, machine=None):
-    if machine == this_machine():
+    """The workspace for `name` on the machine: the one already labelled so (a repo's name, or any), else a new one,
+    in the repo's folder when it's one here, else in the home folder."""
+    if machine in (this_machine(), "this computer"):
         machine = None
-    if machine and machine not in machines():
-        raise HerdrError(f"herdr has no saved machine named {machine} (`herdr machine list`)")
+    if machine:
+        found = machine_named(machine)
+        if found is None:
+            raise HerdrError(f"herdr has no saved machine named {machine} (`herdr machine list`)")
+        machine = found
     repo = find_repo(name) if machine is None else None
-    if repo is None and machine and name.startswith(("/", "~")):
-        args = ["--cwd", name, "--label", Path(name).name]
-    elif repo is not None:
+    label = repo.name if repo is not None else Path(name).name if name.startswith(("/", "~")) else name
+    existing = herdr_json("workspace", "list", machine=machine)["workspaces"]
+    same = next((w for w in existing if (w.get("label") or "").lower() == label.lower()), None)
+    if same:
+        return {"context": {"id": joined(machine, same["workspace_id"]), "name": workspace_name(same),
+                            "location": machine or this_machine()}}
+    if repo is not None:
         args = ["--cwd", str(repo), "--label", repo.name]
-    else:
+    elif machine and name.startswith(("/", "~")):
+        args = ["--cwd", name, "--label", label]
+    elif machine:
+        # Another machine's folders aren't known here: its herdr picks.
         args = ["--label", name]
+    else:
+        args = ["--cwd", str(Path.home()), "--label", name]
     made = herdr_json("workspace", "create", *args, "--no-focus", machine=machine)["workspace"]
     return {"context": {"id": joined(machine, made["workspace_id"]), "name": workspace_name(made),
                         "location": machine or this_machine()}}
