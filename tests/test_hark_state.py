@@ -158,10 +158,11 @@ class HarkState(unittest.TestCase):
         # Not a repo: it opens in the home folder, never wherever herdr would (a checkout other agents work in).
         self.answers[f"|workspace create --cwd {self.home} --label notes --no-focus"] = \
             result({"workspace": {"workspace_id": "wP", "label": "notes"}})
-        self.answers["vega@vega|workspace create --label docs --no-focus"] = result({"workspace": {"workspace_id": "w7", "label": "docs"}})
+        self.answers["vega@vega|workspace create --cwd ~ --label docs --no-focus"] = result({"workspace": {"workspace_id": "w7", "label": "docs"}})
         self.assertEqual(self.run_state("create", "notes")["context"]["id"], "wP")
         self.assertEqual(self.run_state("create", "docs", "vega@vega"),
                          {"context": {"id": "vega@vega/w7", "name": "docs", "location": "vega@vega"}})
+        # Its home folder there (herdr expands ~ on that machine), never wherever its herdr would open.
         # The machine as a person says it: its label's user or host part.
         self.assertEqual(self.run_state("create", "docs", "vega")["context"]["id"], "vega@vega/w7")
         unknown = self.run_state("create", "hark", "nowhere", check=False)

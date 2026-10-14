@@ -140,8 +140,8 @@ def create(name, machine=None):
     elif machine and name.startswith(("/", "~")):
         args = ["--cwd", name, "--label", label]
     elif machine:
-        # Another machine's folders aren't known here: its herdr picks.
-        args = ["--label", name]
+        # Another machine's folders aren't known here: its home folder (that machine's herdr expands ~).
+        args = ["--cwd", "~", "--label", name]
     else:
         args = ["--cwd", str(Path.home()), "--label", name]
     made = herdr_json("workspace", "create", *args, "--no-focus", machine=machine)["workspace"]
