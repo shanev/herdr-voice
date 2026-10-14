@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Herdr event hook: tells Hark's agent when a coding agent at the desk finishes or stops on a question.
 
-On `pane.agent_status_changed`, an agent that goes from working to done or blocked while the user is away from the
-computer is news. The hook tells the agent (Hermes with Hark's hark-auth plugin 1.8 or later, else Hark's own agent)
+Hark doesn't poll the agent: every change it shows (an agent detected or gone, each status change, a pane closed,
+exited or moved, a workspace made, closed, renamed or moved) is reported at once with `"push": false`, for Hark's open
+event stream only. On `pane.agent_status_changed`, an agent that goes from working to done or blocked while the user
+is away from the computer is also news for a push, once settled. The hook tells the agent (Hermes with Hark's hark-auth plugin 1.8 or later, else Hark's own agent)
 that the agent's workspace changed: `POST /v1/skills/herdr-voice/changed` with the workspace and pane. The agent reads
 the workspace's agents with the skill's `scripts/hark_state.py` and pushes the change to the user's phone, with the
 question card of a blocked agent. Agents herdr-voice handed off are skipped: Hermes already waits for those.
@@ -44,6 +46,10 @@ DEFAULT_HARK_AGENT_PORT = 8650
 # Claude can end a reply while a command it started is still running: done, then working again.
 # An alert waits this long and is dropped if the agent went back to work.
 DEFAULT_SETTLE_SECONDS = 20
+
+
+# Changes to which workspaces there are: Hark's list of contexts.
+WORKSPACE_EVENTS = {"workspace_created", "workspace_closed", "workspace_renamed", "workspace_moved", "workspace_reordered"}
 
 
 def is_alert(previous, status):
@@ -249,12 +255,15 @@ def alert_when_settled(config, pane, status, statuses, event):
     changed(config, agent.get("workspace_id"), pane)
 
 
-def changed(config, workspace, pane=None):
-    """Tells Hark's agent the workspace changed (the pane's agent in it, if given): it reads the workspace's agents
-    again and pushes or withdraws what's new. An agent without skill state (404), or one that's down, is skipped."""
-    if not config["key"] or not workspace:
+def changed(config, workspace, pane=None, push=True):
+    """Tells Hark's agent the workspace changed (the pane's agent in it, if given), or, without a workspace, which
+    workspaces there are: it reads them again and sends them to Hark's open stream, or, while Hark is closed, pushes
+    or withdraws what's new. `push=False` is for the stream only (the agent still withdraws a question that's over).
+    An agent without skill state (404), or one that's down, is skipped."""
+    if not config["key"] or (pane and not workspace):
         return
-    body = {"context": workspace, **({"item": pane} if pane else {})}
+    body = {**({"context": workspace} if workspace else {}), **({"item": pane} if pane else {}),
+            **({} if push else {"push": False})}
     try:
         post(f"{config['url']}/v1/skills/{SKILL}/changed", config["key"], body, 60)
     except (urllib.error.URLError, OSError) as error:
@@ -273,27 +282,39 @@ def main():
     event = json.loads(os.environ.get("HERDR_PLUGIN_EVENT_JSON") or "{}").get("data") or {}
     state = state_dir()
     statuses = state / "statuses.json"
+    # Hark doesn't poll: every change it shows is reported at once, for its open stream (`push=False`). Only a question
+    # that's over (to withdraw it) and a settled alert (below) may push.
+    kind = event.get("type")
+    if kind in WORKSPACE_EVENTS:
+        changed(config_for(state), None, push=False)
+        return
+    if kind == "pane_agent_detected":
+        changed(config_for(state), event.get("workspace_id"), event.get("pane_id"), push=False)
+        return
     gone = gone_pane(event)
     if gone:
         status, workspace = forget_pane(statuses, gone)
-        if status == "blocked":
-            changed(config_for(state), event.get("workspace_id") or event.get("previous_workspace_id") or workspace, gone)
+        if status is not None:
+            changed(config_for(state), event.get("workspace_id") or event.get("previous_workspace_id") or workspace, gone,
+                    push=status == "blocked")
         return
     pane, status = event.get("pane_id"), event.get("agent_status")
     if not pane or not status:
         return
     previous, event_number = record_status(statuses, pane, status, event.get("workspace_id"))
-    resolved = is_resolved(previous, status)
-    if not resolved and not is_alert(previous, status):
+    if previous == status:
         return
-    agent = running_agent(pane)
-    if agent is not None and agent.get("workspace_id"):
-        remember_workspace(statuses, pane, agent["workspace_id"])
-    if resolved:
-        changed(config_for(state), (agent or {}).get("workspace_id") or recorded_workspace(statuses, pane), pane)
-    if not is_alert(previous, status) or agent is None or take_hand_off([pane, agent.get("name")], time.time()):
-        return
+    resolved, alert = is_resolved(previous, status), is_alert(previous, status)
+    agent = running_agent(pane) if resolved or alert else None
+    workspace = event.get("workspace_id") or (agent or {}).get("workspace_id") or recorded_workspace(statuses, pane)
+    if not workspace and agent is None:
+        workspace = (running_agent(pane) or {}).get("workspace_id")
+    if workspace:
+        remember_workspace(statuses, pane, workspace)
     config = config_for(state)
+    changed(config, workspace, pane, push=resolved)
+    if not alert or agent is None or take_hand_off([pane, agent.get("name")], time.time()):
+        return
     if not config["key"]:
         print("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.hark-agent/agent-key)", file=sys.stderr)
         return

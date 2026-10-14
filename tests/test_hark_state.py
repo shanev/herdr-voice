@@ -64,6 +64,10 @@ TABS = [{"tab_id": "w5M:t1", "workspace_id": "w5M", "label": "1 · Fixing"}, {"t
 WORKSPACES = [{"workspace_id": "w1P", "label": "asterism"}, {"workspace_id": "w5M", "label": "hark"}, {"workspace_id": "w9"}]
 
 
+# The start of the done Claude's last reply, for Hark's row: 300 characters at most, cut at a word.
+RESULT_TEXT = "Opened #12 for the swipe fix.\nAll checks green.\n\n" + "More detail. " * 18 + "More detail.…"
+
+
 class HarkState(unittest.TestCase):
     def setUp(self):
         self.folder = Path(tempfile.mkdtemp())
@@ -92,6 +96,17 @@ class HarkState(unittest.TestCase):
         marks = self.home / ".cache" / "herdr-voice" / "handed-off"
         marks.mkdir(parents=True)
         (marks / "handed.finished").touch()
+        # The done Claude's session file, as herdr records it: its last reply is the result card's text.
+        session = self.home / ".claude" / "projects" / "-hark" / "s-42.jsonl"
+        session.parent.mkdir(parents=True)
+        session.write_text("\n".join(json.dumps(entry) for entry in [
+            {"type": "user", "message": {"content": "Open the PR"}},
+            {"type": "assistant", "message": {"id": "m1", "stop_reason": "end_turn", "content": [
+                {"type": "text", "text": "Opened #12 for the swipe fix.\nAll checks green.\n\n" + "More detail. " * 40}]}},
+        ]) + "\n")
+        self.agents = json.loads(json.dumps(AGENTS))
+        self.agents[2]["agent_session"] = {"agent": "claude", "kind": "id", "value": "s-42"}
+        self.answers["|agent list"] = result({"agents": self.agents})
 
     def run_state(self, *args, check=True):
         (self.bin / "answers.json").write_text(json.dumps(self.answers))
@@ -129,7 +144,7 @@ class HarkState(unittest.TestCase):
              "card": {"kind": "question", "id": question, "screen": SCREEN_TEXT}},
             # Neither: its kind and tab, as herdr's sidebar numbers tabs; done with a result the user hasn't heard.
             {"id": "w5M:p3", "name": "Claude · 2", "state": "done", "detail": "PR opened",
-             "card": {"kind": "result", "id": "w5M:p3:42"}},
+             "card": {"kind": "result", "id": "w5M:p3:42", "text": RESULT_TEXT}},
             {"id": "w5M:p4", "name": "Omp · mine", "state": "idle", "detail": "Waiting"},
             # Handed off by herdr-voice: Hermes tells its result in the conversation, so no card.
             {"id": "w5M:p5", "name": "handed", "state": "done", "detail": "Tests pass"},
