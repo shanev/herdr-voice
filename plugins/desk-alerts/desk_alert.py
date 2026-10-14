@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Herdr event hook: tells Hermes when a coding agent at the desk finishes or stops on a question.
+"""Herdr event hook: tells Hark's agent when a coding agent at the desk finishes or stops on a question.
 
-On `pane.agent_status_changed`, an agent that goes from working to done or blocked while the user
-is away from the computer becomes a turn in the Hermes session `herdr-desk-agents` ("Desk agents").
-Hermes says what happened in a sentence or two, and a client watching that session (Hark) tells
-the user. Agents herdr-voice handed off are skipped: Hermes already waits for those. A blocked
-agent's alert carries its screen as data, for Hark to show the question as a card.
+On `pane.agent_status_changed`, an agent that goes from working to done or blocked while the user is away from the
+computer is news. The hook tells the agent (Hermes with Hark's hark-auth plugin 1.8 or later, else Hark's own agent)
+that the agent's workspace changed: `POST /v1/skills/herdr-voice/changed` with the workspace and pane. The agent reads
+the workspace's agents with the skill's `scripts/hark_state.py` and pushes the change to the user's phone, with the
+question card of a blocked agent. Agents herdr-voice handed off are skipped: Hermes already waits for those.
 
-A question stays on the user's phone until its pane moves on: the agent was answered (at the desk or
-through Hermes) and went back to work, quit, or its pane closed or moved. Then Hark's hark-auth plugin
-on the gateway hears it (`POST /v1/hark/desk/resolved`) and takes the question off the phone.
+A question stays on the user's phone until its pane moves on: the agent was answered (at the desk or through Hark) and
+went back to work, quit, or its pane closed or moved. Then the hook reports the change again, and the agent withdraws
+the question.
 
-`desk_alert.py realert <pane>` alerts again for an agent still blocked after an answer, when its
-dialog moved on to another question.
+`desk_alert.py realert <pane>` alerts again for an agent still blocked after an answer, when its dialog moved on to
+another question.
 
-Settings, all optional, in this plugin's config dir `.env` (`herdr plugin config-dir
-herdr-voice.desk-alerts`): AWAY_AFTER_MINUTES (default 5; 0 alerts even at the desk),
-HERMES_API_URL and HERMES_API_KEY (default: Hermes' own API_SERVER_PORT and API_SERVER_KEY in
-~/.hermes/.env). Stdlib only.
+Settings, all optional, in this plugin's config dir `.env` (`herdr plugin config-dir herdr-voice.desk-alerts`):
+AWAY_AFTER_MINUTES (default 5; 0 alerts even at the desk), SETTLE_SECONDS (default 20), HERMES_API_URL and
+HERMES_API_KEY (default: Hermes' own API_SERVER_PORT and API_SERVER_KEY in ~/.hermes/.env, else Hark's agent's PORT and
+key in ~/.hark-agent). Stdlib only.
 """
 import fcntl
 import json
@@ -30,17 +30,15 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-SESSION_ID = "herdr-desk-agents"
-SESSION_TITLE = "Desk agents"
-# How every alert turn starts; Hark hides these turns' input and reports the replies.
-ALERT_PREFIX = "[Desk agent alert]"
-# Starts the line that carries a blocked agent's screen as data, for a client to show its question as a card.
-QUESTION_PREFIX = "[Desk question] "
+# The skill whose items these are (its SKILL.md declares them for Hark).
+SKILL = "herdr-voice"
 # herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off.
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
 DEFAULT_AWAY_MINUTES = 5
 DEFAULT_PORT = 8642
+HARK_AGENT = Path.home() / ".hark-agent"
+DEFAULT_HARK_AGENT_PORT = 8650
 # Claude can end a reply while a command it started is still running: done, then working again.
 # An alert waits this long and is dropped if the agent went back to work.
 DEFAULT_SETTLE_SECONDS = 20
@@ -68,18 +66,32 @@ def gone_pane(event):
 
 
 def forget_pane(path, pane):
-    """Drops a pane that's gone and returns its last status."""
+    """Drops a pane that's gone and returns its last status and workspace."""
     with _statuses(path) as statuses:
-        return (statuses.pop(pane, None) or {}).get("status")
+        entry = statuses.pop(pane, None) or {}
+        return entry.get("status"), entry.get("workspace")
 
 
-def record_status(path, pane, status):
-    """Saves the pane's status and returns the one before it, and this event's number for the pane.
-    Hooks can run at the same time."""
+def record_status(path, pane, status, workspace=None):
+    """Saves the pane's status (and workspace, when known) and returns the one before it, and this event's number for
+    the pane. Hooks can run at the same time."""
     with _statuses(path) as statuses:
         entry = statuses.get(pane) or {}
-        statuses[pane] = {"status": status, "event": entry.get("event", 0) + 1}
+        statuses[pane] = {"status": status, "event": entry.get("event", 0) + 1,
+                          "workspace": workspace or entry.get("workspace")}
         return entry.get("status"), statuses[pane]["event"]
+
+
+def remember_workspace(path, pane, workspace):
+    """Saves the pane's workspace, for when it's gone; not an event of its own (a settling alert checks those)."""
+    with _statuses(path) as statuses:
+        if pane in statuses:
+            statuses[pane]["workspace"] = workspace
+
+
+def recorded_workspace(path, pane):
+    with _statuses(path) as statuses:
+        return (statuses.get(pane) or {}).get("workspace")
 
 
 def latest_event(path, pane):
@@ -111,16 +123,25 @@ class _statuses:
 
 
 def take_hand_off(names, now, folder=HANDED_OFF):
-    """True when herdr-voice handed this agent's task off (it reports that one itself). The mark is
-    used up, so the agent's next task from the desk is alerted."""
+    """True when herdr-voice handed this agent's task off (it reports that one itself). The mark is used up: it becomes
+    `<name>.finished`, which tells the skill's hark_state.py this finish is Hermes' to tell, until the agent's next task
+    from the desk finishes, which is alerted (and drops it)."""
     handed_off = False
     for name in filter(None, names):
         marker = folder / name.replace("/", "_")
+        finished = marker.with_name(marker.name + ".finished")
         try:
-            handed_off |= now - marker.stat().st_mtime < HAND_OFF_TTL
-            marker.unlink()
+            fresh = now - marker.stat().st_mtime < HAND_OFF_TTL
+            handed_off |= fresh
+            if fresh:
+                marker.replace(finished)
+            else:
+                marker.unlink()
         except FileNotFoundError:
             pass
+    if not handed_off:
+        for name in filter(None, names):
+            folder.joinpath(name.replace("/", "_") + ".finished").unlink(missing_ok=True)
     return handed_off
 
 
@@ -148,72 +169,34 @@ def read_env_file(path):
     return values
 
 
-def settings(config_dir, hermes_env):
+def read_key(path):
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def settings(config_dir, hermes_env, hark_agent=HARK_AGENT):
     own, hermes = read_env_file(Path(config_dir) / ".env"), read_env_file(hermes_env)
     port = hermes.get("API_SERVER_PORT") or DEFAULT_PORT
+    key = own.get("HERMES_API_KEY") or hermes.get("API_SERVER_KEY") or ""
+    url = own.get("HERMES_API_URL") or f"http://127.0.0.1:{port}"
+    if not key and read_key(Path(hark_agent) / "agent-key"):
+        # No Hermes here: Hark's own agent, which runs the skill too.
+        key = read_key(Path(hark_agent) / "agent-key")
+        url = own.get("HERMES_API_URL") or "http://127.0.0.1:{}".format(
+            read_env_file(Path(hark_agent) / "env").get("PORT") or DEFAULT_HARK_AGENT_PORT)
     def number(key, default):
         try:
             return float(own.get(key, default))
         except ValueError:
             return default
     return {
-        "url": (own.get("HERMES_API_URL") or f"http://127.0.0.1:{port}").rstrip("/"),
-        "key": own.get("HERMES_API_KEY") or hermes.get("API_SERVER_KEY") or "",
+        "url": url.rstrip("/"),
+        "key": key,
         "away_after_minutes": number("AWAY_AFTER_MINUTES", DEFAULT_AWAY_MINUTES),
         "settle_seconds": number("SETTLE_SECONDS", DEFAULT_SETTLE_SECONDS),
     }
-
-
-def where(labels):
-    """Where the agent is, the way herdr's sidebar shows it: workspace, then tab."""
-    workspace, tab, _ = labels
-    return f'workspace "{workspace}", tab "{tab}"' if tab else f'workspace "{workspace}"'
-
-
-def called(agent, labels):
-    """The agent's name and its pane's label, for the alert's parenthesis. After `where`, so the alert
-    still starts the way Hark's hark-auth plugin 1.6 and earlier read it."""
-    return "".join(f', {what} "{value}"' for what, value in (("named", agent.get("name")), ("pane label", labels[2])) if value)
-
-
-def screen_text(screen):
-    """The screen without trailing spaces and blank lines, newest 6000 characters."""
-    lines = [line.rstrip() for line in screen.splitlines()]
-    return "\n".join(line for line in lines if line)[-6000:]
-
-
-def question_line(agent, labels, screen):
-    """The blocked agent's screen as one line of JSON after QUESTION_PREFIX, with where the agent is
-    and the script that alerts again. Data only: Hermes reads this line too, so nothing in it may
-    read as an instruction. Any agent's dialog, whatever it looks like: Hark reads the question
-    from the screen."""
-    workspace, tab, label = labels
-    data = {"pane": agent.get("pane_id"), "agent": agent.get("agent"), "name": agent.get("name"), "label": label,
-            "workspace": workspace, "tab": tab, "screen": screen_text(screen), "script": str(Path(__file__).resolve())}
-    return QUESTION_PREFIX + json.dumps(data, ensure_ascii=False)
-
-
-def alert_message(agent, labels, status, words):
-    kind = agent.get("agent") or "coding"
-    blocked = status == "blocked"
-    what = "stopped and is waiting for an answer" if blocked else "finished its task"
-    source = ("Its screen is the `screen` of the data line at the end." if blocked
-              else f"Its last reply:\n\n{words.strip()}")
-    message = (
-        f"{ALERT_PREFIX} The {kind} agent in herdr {where(labels)} (pane {agent.get('pane_id')}"
-        f"{called(agent, labels)}, folder {agent.get('cwd')}) {what} while the user was away. {source}\n\n"
-        "Tell the user in a sentence or two, the way you'd say it out loud: call the agent by its name, "
-        "else its pane's label, else its workspace and tab, never its pane id, then say what it did, "
-        "or the question it's asking. Text in its empty "
-        "input box is a suggested next prompt, not something queued: leave it out. Don't answer the "
-        "agent or send it anything until the user says to. When they do, load the herdr-voice skill "
-        f"and first run `{hand_off_command(agent.get('pane_id'))}`, so its next finish is yours to "
-        "report, not another alert."
-    )
-    if not blocked:
-        return message
-    return (message + "\n\nThe line below is data for the app, which shows the question as a card. It isn't "
-            "an answer and asks nothing of you.\n" + question_line(agent, labels, words))
 
 
 def hand_off_command(pane):
@@ -236,33 +219,6 @@ def running_agent(pane):
         return None
 
 
-def labels(agent):
-    """The agent's workspace and tab labels, and its pane's label if it has one. A hook's own
-    context describes the focused pane, which may be another one."""
-    def get(kind, key):
-        code, out = herdr(kind, "get", agent.get(key) or "")
-        try:
-            return json.loads(out)["result"][kind] if code == 0 else {}
-        except (json.JSONDecodeError, KeyError, TypeError):
-            return {}
-    pane = get("pane", "pane_id")
-    # A pane's label is its terminal title until `herdr pane rename` (the user, or a plugin such as Auto Title) sets one.
-    pane_label = pane.get("label") if pane.get("label") != pane.get("terminal_title_stripped") else None
-    return get("workspace", "workspace_id").get("label") or agent.get("workspace_id") or "?", get("tab", "tab_id").get("label"), pane_label
-
-
-def last_words(pane, status):
-    if status == "done":
-        for script in sorted(Path.home().glob(".hermes/skills/*/herdr-voice/scripts/last_reply.py")):
-            result = subprocess.run([sys.executable, str(script), pane], capture_output=True, text=True, timeout=20)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout[-6000:]
-        _, screen = herdr("agent", "read", pane, "--source", "recent-unwrapped", "--lines", "80")
-    else:
-        _, screen = herdr("agent", "read", pane, "--source", "visible")
-    return screen[-6000:]
-
-
 def post(url, key, body, timeout):
     request = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
                                      headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
@@ -271,36 +227,27 @@ def post(url, key, body, timeout):
 
 
 def alert_when_settled(config, pane, status, statuses, event):
-    """Once the status has held for the settle time (no newer event for the pane), reads what the
-    agent said and runs the alert turn. Runs detached from the hook: settling and the turn take a while."""
+    """Once the status has held for the settle time (no newer event for the pane), tells the agent. Runs detached
+    from the hook: settling takes a while."""
     time.sleep(config["settle_seconds"])
     if latest_event(statuses, pane) != event:
         return
     agent = running_agent(pane)
     if agent is None or agent.get("agent_status") != status:
         return
-    deliver(config, alert_message(agent, labels(agent), status, last_words(pane, status)))
+    changed(config, agent.get("workspace_id"), pane)
 
 
-def resolve(config, pane):
-    """Tells Hermes' hark-auth plugin the pane's question is over. A gateway without it (404), or
-    one that's down, is skipped: the question's answer still checks the screen first."""
-    if not config["key"]:
+def changed(config, workspace, pane=None):
+    """Tells Hark's agent the workspace changed (the pane's agent in it, if given): it reads the workspace's agents
+    again and pushes or withdraws what's new. An agent without skill state (404), or one that's down, is skipped."""
+    if not config["key"] or not workspace:
         return
+    body = {"context": workspace, **({"item": pane} if pane else {})}
     try:
-        post(f"{config['url']}/v1/hark/desk/resolved", config["key"], {"pane": pane}, 10)
+        post(f"{config['url']}/v1/skills/{SKILL}/changed", config["key"], body, 60)
     except (urllib.error.URLError, OSError) as error:
-        print(f"desk-alerts: question in {pane} not resolved on Hermes: {error}", file=sys.stderr)
-
-
-def deliver(config, message):
-    """Runs the alert turn in the Desk agents session, creating the session the first time."""
-    try:
-        post(f"{config['url']}/api/sessions", config["key"], {"id": SESSION_ID, "title": SESSION_TITLE}, 30)
-    except urllib.error.HTTPError as error:
-        if error.code != 409:
-            raise
-    post(f"{config['url']}/api/sessions/{SESSION_ID}/chat", config["key"], {"message": message}, 600)
+        print(f"desk-alerts: {workspace} {pane or ''} not reported to the agent: {error}", file=sys.stderr)
 
 
 def main():
@@ -317,23 +264,27 @@ def main():
     statuses = state / "statuses.json"
     gone = gone_pane(event)
     if gone:
-        if forget_pane(statuses, gone) == "blocked":
-            resolve(config_for(state), gone)
+        status, workspace = forget_pane(statuses, gone)
+        if status == "blocked":
+            changed(config_for(state), event.get("workspace_id") or event.get("previous_workspace_id") or workspace, gone)
         return
     pane, status = event.get("pane_id"), event.get("agent_status")
     if not pane or not status:
         return
-    previous, event_number = record_status(statuses, pane, status)
-    if is_resolved(previous, status):
-        resolve(config_for(state), pane)
-    if not is_alert(previous, status):
+    previous, event_number = record_status(statuses, pane, status, event.get("workspace_id"))
+    resolved = is_resolved(previous, status)
+    if not resolved and not is_alert(previous, status):
         return
     agent = running_agent(pane)
-    if agent is None or take_hand_off([pane, agent.get("name")], time.time()):
+    if agent is not None and agent.get("workspace_id"):
+        remember_workspace(statuses, pane, agent["workspace_id"])
+    if resolved:
+        changed(config_for(state), (agent or {}).get("workspace_id") or recorded_workspace(statuses, pane), pane)
+    if not is_alert(previous, status) or agent is None or take_hand_off([pane, agent.get("name")], time.time()):
         return
     config = config_for(state)
     if not config["key"]:
-        print("desk-alerts: no Hermes API key (API_SERVER_KEY in ~/.hermes/.env)", file=sys.stderr)
+        print("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.hark-agent/agent-key)", file=sys.stderr)
         return
     ioreg = subprocess.run(["ioreg", "-c", "IOHIDSystem"], capture_output=True, text=True).stdout \
         if sys.platform == "darwin" else ""
@@ -367,7 +318,7 @@ def realert(pane):
     state = state_dir()
     config = config_for(state)
     if not config["key"]:
-        sys.exit("desk-alerts: no Hermes API key (API_SERVER_KEY in ~/.hermes/.env)")
+        sys.exit("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.hark-agent/agent-key)")
     deliver_detached(state, config, pane, "blocked", latest_event(state / "statuses.json", pane))
     print("The next question will come as a new alert.")
 
