@@ -90,7 +90,7 @@ class Frontmatter(unittest.TestCase):
         # Hark scopes a workspace's page with the scope sentence; the skill must use it instead of guessing.
         self.assertIn("## Hark", TEXT)
         section = TEXT.split("## Hark")[1].split("\n## ")[0]
-        for needle in ("instructions", "--machine <location>", "[Card answer]", "[Card result]", "scripts/hark_state.py realert"):
+        for needle in ("instructions", "--machine <machine>", "Never `ssh`", "[Card answer]", "[Card result]", "scripts/hark_state.py realert"):
             self.assertIn(needle, section)
 
 

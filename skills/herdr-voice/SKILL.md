@@ -25,7 +25,7 @@ metadata:
         - python3
         - scripts/hark_state.py
         - create
-      scope: "This conversation is about the herdr workspace '{name}' (id {id}) on {location}. Unless the user names another, new sessions go in it, and the agents they mention are its agents."
+      scope: "This conversation is about the herdr workspace '{name}' on {location} (Hark context {id}). Unless the user names another, new sessions go in it and the agents they mention are its agents. Load herdr-voice: its Hark section says how to reach it."
     items:
       list:
         - python3
@@ -74,7 +74,7 @@ X is an agent, matched as in **What's running**.
 
 Hark shows a page per Herdr workspace, with its agents, from `scripts/hark_state.py` (declared in this file's frontmatter; Hark's agent runs it, you don't). A run from a workspace's page says in its instructions which workspace the conversation is about, with its id and the machine it's on.
 
-- **The workspace from the instructions** is the one the user means. New sessions go in it as new tabs (step 3 of **Start a session**, with its id; skip `repo_workspace.py`), and "the Claude", "it" or "the agent" are agents in it, unless the user names another repo or workspace. If its location isn't this computer (`hostname -s`), it's on one of Herdr's saved machines: put `--machine <location>` right after `herdr` in every herdr command for it, and the repo paths are that machine's.
+- **The workspace from the instructions** is the one the user means. New sessions go in it as new tabs (step 3 of **Start a session**, with its id; skip `repo_workspace.py`), and "the Claude", "it" or "the agent" are agents in it, unless the user names another repo or workspace. The Hark context is the workspace id (`w5M`) for one on this computer. For one on another machine it's `<machine>/<workspace id>` (`vega@vega/w2`): that's one of Herdr's saved machines (`herdr machine list`), so put `--machine <machine>` right after `herdr` in every herdr command for it (`herdr --machine vega@vega agent list`) and use the workspace id after the `/`. Never `ssh` to the machine: Herdr reaches it. Its repo paths are that machine's.
 - **[Card answer]:** a run that starts with `[Card answer]` is the user answering an agent's question from its card in Hark; it names the agent's pane id as its item. Read the screen (`herdr agent read <pane_id> --source visible`). If that question isn't showing anymore, it was answered at the desk: say so in a few words and do nothing else. Otherwise mark the agent as yours (the `touch` line in **Send a task**), answer it as **Answer a question** says, and read the screen again. If the agent asks another question now, run `rm -f ~/.cache/herdr-voice/handed-off/<pane_id>` and `python3 ${HERMES_SKILL_DIR}/scripts/hark_state.py realert <pane_id>` (`scripts/hark_state.py` in this skill's folder), and say only that you answered it. Otherwise hand off the wait as in **Send a task**, and say in a sentence that it's running.
 - **[Card result]:** a run that starts with `[Card result]` asks for an agent's result: read it as in **Read the result** and report it as in **Reporting back by voice**.
 

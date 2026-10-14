@@ -148,20 +148,32 @@ class HarkState(unittest.TestCase):
         self.assertEqual(next(i for i in items if i["id"] == "w1P:p8")["state"], "idle")
 
     def test_create_finds_the_repo_and_opens_its_workspace_without_focus(self):
+        self.answers["|workspace list"] = result({"workspaces": [w for w in WORKSPACES if w.get("label") != "hark"]})
         self.answers["|workspace create --cwd {} --label hark --no-focus".format(self.home / "github.com/tensor-systems/hark")] = \
             result({"workspace": {"workspace_id": "wN", "label": "hark"}, "root_pane": {"pane_id": "wN:p1"}})
         made = self.run_state("create", "hark")
         self.assertEqual(made, {"context": {"id": "wN", "name": "hark", "location": os.uname().nodename.split(".")[0]}})
 
     def test_create_with_a_name_thats_no_repo_or_on_another_machine(self):
-        self.answers["|workspace create --label notes --no-focus"] = result({"workspace": {"workspace_id": "wP", "label": "notes"}})
-        self.answers["vega@vega|workspace create --label hark --no-focus"] = result({"workspace": {"workspace_id": "w7", "label": "hark"}})
+        # Not a repo: it opens in the home folder, never wherever herdr would (a checkout other agents work in).
+        self.answers[f"|workspace create --cwd {self.home} --label notes --no-focus"] = \
+            result({"workspace": {"workspace_id": "wP", "label": "notes"}})
+        self.answers["vega@vega|workspace create --label docs --no-focus"] = result({"workspace": {"workspace_id": "w7", "label": "docs"}})
         self.assertEqual(self.run_state("create", "notes")["context"]["id"], "wP")
-        self.assertEqual(self.run_state("create", "hark", "vega@vega"),
-                         {"context": {"id": "vega@vega/w7", "name": "hark", "location": "vega@vega"}})
+        self.assertEqual(self.run_state("create", "docs", "vega@vega"),
+                         {"context": {"id": "vega@vega/w7", "name": "docs", "location": "vega@vega"}})
+        # The machine as a person says it: its label's user or host part.
+        self.assertEqual(self.run_state("create", "docs", "vega")["context"]["id"], "vega@vega/w7")
         unknown = self.run_state("create", "hark", "nowhere", check=False)
         self.assertNotEqual(unknown.returncode, 0)
         self.assertIn("nowhere", unknown.stderr)
+
+    def test_create_opens_the_workspace_that_has_the_name_already(self):
+        # "Open hark on vega" when vega has a hark workspace: that one, not a second.
+        self.assertEqual(self.run_state("create", "hark", "vega"),
+                         {"context": {"id": "vega@vega/w2", "name": "hark", "location": "vega@vega"}})
+        self.assertEqual(self.run_state("create", "Hark")["context"]["id"], "w5M")
+        self.assertFalse([c for c in self.calls() if c["args"][:2] == ["workspace", "create"]], "a second workspace")
 
     def test_realert_runs_the_desk_alerts_plugin(self):
         plugin = self.folder / "plugin"
@@ -171,6 +183,35 @@ class HarkState(unittest.TestCase):
                                                                   {"plugin_id": "herdr-voice.desk-alerts", "plugin_root": str(plugin)}]})
         self.run_state("realert", "w5M:p2", check=False)
         self.assertEqual((plugin / "ran").read_text(), "realert w5M:p2")
+
+    def test_names_tell_agents_apart_and_a_cut_title_is_no_label(self):
+        # Two unnamed omps in one tab; a pane whose label is only its terminal title cut short (herdr does that at 50).
+        title = "Build SAFT investor reconciliation table for the auditors"
+        self.answers["|agent list"] = result({"agents": [
+            {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p1", "tab_id": "w7F:t1", "workspace_id": "w7F",
+             "terminal_title_stripped": "One"},
+            {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p3", "tab_id": "w7F:t1", "workspace_id": "w7F",
+             "terminal_title_stripped": "Two"},
+            {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p4", "tab_id": "w7F:t1", "workspace_id": "w7F",
+             "terminal_title_stripped": title}]})
+        self.answers["|pane list"] = result({"panes": [{"pane_id": "w7F:p4", "label": title[:50],
+                                                         "terminal_title_stripped": title}]})
+        self.answers["|tab list"] = result({"tabs": [{"tab_id": "w7F:t1", "workspace_id": "w7F", "label": "1 · x"}]})
+        names = [i["name"] for i in self.run_state("items", "w7F")["items"]]
+        self.assertEqual(len(set(names)), 3, names)
+        self.assertEqual(names[0], "Omp · 1")
+        self.assertNotIn(title[:50], names, "A cut terminal title isn't the user's label")
+
+    def test_icon_font_glyphs_are_dropped(self):
+        # Nerd Font icons (private use) have no glyph on the phone, and speech would read them.
+        self.answers["|agent list"] = result({"agents": [
+            {"agent": "omp", "agent_status": "working", "pane_id": "w7F:p1", "tab_id": "w7F:t1", "workspace_id": "w7F",
+             "name": "clip\U000f03e2", "terminal_title_stripped": "π > \U000f03e2 CLIP: Improve MOLLE clip design \ue0b0"}]})
+        self.answers["|pane list"] = result({"panes": []})
+        self.answers["|tab list"] = result({"tabs": [{"tab_id": "w7F:t1", "workspace_id": "w7F", "label": "1 · x"}]})
+        [item] = self.run_state("items", "w7F")["items"]
+        self.assertEqual(item["detail"], "π > CLIP: Improve MOLLE clip design")
+        self.assertEqual(item["name"], "clip")
 
     def test_herdr_failing_is_an_error_not_an_empty_list(self):
         del self.answers["|agent list"]
