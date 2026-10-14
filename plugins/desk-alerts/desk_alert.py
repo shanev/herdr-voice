@@ -82,6 +82,13 @@ def record_status(path, pane, status, workspace=None):
         return entry.get("status"), statuses[pane]["event"]
 
 
+def remember_workspace(path, pane, workspace):
+    """Saves the pane's workspace, for when it's gone; not an event of its own (a settling alert checks those)."""
+    with _statuses(path) as statuses:
+        if pane in statuses:
+            statuses[pane]["workspace"] = workspace
+
+
 def recorded_workspace(path, pane):
     with _statuses(path) as statuses:
         return (statuses.get(pane) or {}).get("workspace")
@@ -270,7 +277,7 @@ def main():
         return
     agent = running_agent(pane)
     if agent is not None and agent.get("workspace_id"):
-        record_status(statuses, pane, status, agent["workspace_id"])
+        remember_workspace(statuses, pane, agent["workspace_id"])
     if resolved:
         changed(config_for(state), (agent or {}).get("workspace_id") or recorded_workspace(statuses, pane), pane)
     if not is_alert(previous, status) or agent is None or take_hand_off([pane, agent.get("name")], time.time()):

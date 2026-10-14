@@ -102,6 +102,38 @@ class Resolved(unittest.TestCase):
             desk_alert.post = original
 
 
+class Alerting(unittest.TestCase):
+    """The hook, for an agent that stops: what it hands the detached settle-and-deliver step must still be the pane's
+    latest event once it settles, or the alert drops itself (found live: saving the workspace counted as an event)."""
+
+    def test_an_agent_that_stops_is_delivered_once_settled(self):
+        spawned, sent = [], []
+        names = ("deliver_detached", "state_dir", "config_for", "running_agent", "post", "take_hand_off")
+        original = {n: getattr(desk_alert, n) for n in names}
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                state = Path(folder)
+                desk_alert.state_dir = lambda: state
+                desk_alert.config_for = lambda state: {"key": "k", "url": "http://hermes", "away_after_minutes": 0,
+                                                       "settle_seconds": 0}
+                agent = {"agent": "claude", "pane_id": "w1:p1", "workspace_id": "w1", "agent_status": "blocked"}
+                desk_alert.running_agent = lambda pane: agent
+                desk_alert.take_hand_off = lambda names, now: False
+                desk_alert.post = lambda url, key, body, timeout: sent.append((url, body))
+                desk_alert.deliver_detached = lambda state, config, pane, status, event: spawned.append((config, pane, status, event))
+                for status in ("working", "blocked"):
+                    os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps({"data": {"type": "pane_agent_status_changed",
+                                                                                 "pane_id": "w1:p1", "agent_status": status}})
+                    desk_alert.main()
+                [(config, pane, status, event)] = spawned
+                desk_alert.alert_when_settled(config, pane, status, state / "statuses.json", event)
+        finally:
+            for n, f in original.items():
+                setattr(desk_alert, n, f)
+            os.environ.pop("HERDR_PLUGIN_EVENT_JSON", None)
+        self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1"})])
+
+
 class HandOffs(unittest.TestCase):
     def test_a_hand_off_is_skipped_once(self):
         with tempfile.TemporaryDirectory() as folder:
