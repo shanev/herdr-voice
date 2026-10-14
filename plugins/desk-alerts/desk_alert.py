@@ -6,7 +6,7 @@ exited or moved, a workspace made, closed, renamed or moved) is reported at once
 event stream only. On `pane.agent_status_changed`, an agent that goes from working to done or blocked while the user
 is away from the computer is also news for a push, once settled. The hook tells the agent (Hermes with Hark's hark-auth plugin 1.8 or later, else Hark's own agent)
 that the agent's workspace changed: `POST /v1/skills/herdr-voice/changed` with the workspace and pane. Every agent on
-the machine is told (Hermes and Hark's agent both serve Hark a stream); only the first may push. The agent reads
+the machine is told at once (Hermes and Hark's agent each serve Hark a stream); each pushes only to its own phones. The agent reads
 the workspace's agents with the skill's `scripts/hark_state.py` and pushes the change to the user's phone, with the
 question card of a blocked agent. Agents herdr-voice handed off are skipped: Hermes already waits for those.
 
@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -266,18 +267,25 @@ def changed(config, workspace, pane=None, push=True):
     """Tells Hark's agent the workspace changed (the pane's agent in it, if given), or, without a workspace, which
     workspaces there are: it reads them again and sends them to Hark's open stream, or, while Hark is closed, pushes
     or withdraws what's new. `push=False` is for the stream only (the agent still withdraws a question that's over).
-    Every agent on the machine is told, since each serves Hark its own stream; only the first may push, so a phone paired
-    with two isn't told twice. An agent without skill state (404), or one that's down, is skipped, and the rest are
-    still told."""
+    Every agent on the machine is told, at once, since each serves Hark its own stream: a slow one holds up none of the
+    others. Each may push: an agent pushes only to the phones paired with it. An agent without skill state (404), or one
+    that's down, is skipped, and the rest are still told."""
     if pane and not workspace:
         return
-    where = {**({"context": workspace} if workspace else {}), **({"item": pane} if pane else {})}
-    for index, agent in enumerate(config["agents"]):
-        body = {**where, **({} if push and index == 0 else {"push": False})}
+    body = {**({"context": workspace} if workspace else {}), **({"item": pane} if pane else {}),
+            **({} if push else {"push": False})}
+
+    def tell(agent):
         try:
             post(f"{agent['url']}/v1/skills/{SKILL}/changed", agent["key"], body, 60)
         except (urllib.error.URLError, OSError) as error:
             print(f"desk-alerts: {workspace or 'workspaces'} {pane or ''} not reported to {agent['url']}: {error}", file=sys.stderr)
+
+    threads = [threading.Thread(target=tell, args=(agent,)) for agent in config["agents"]]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
 
 def main():
