@@ -58,7 +58,7 @@ The skill tells Hark all this through `metadata.hark` in its frontmatter (`conte
 
 ## Desk alerts
 
-Agents you start yourself at the desk get the same treatment, with a herdr plugin. When one finishes, or stops on a question, while you're away from the computer, the plugin tells Hark's agents on the machine (Hermes with Hark's `hark-auth` plugin 2.0 or later, and Hark's own agent, each when it's there) that its workspace changed; only the first, Hermes, may push it, so you're told once. The agent reads the workspace's agents again and pushes the change to your phone: "apple-models in hark needs you", with the question's options as buttons. A tap opens that workspace's page in Hark, where the agent shows as waiting, with its question as a card.
+Agents you start yourself at the desk get the same treatment, with a herdr plugin. When one finishes, or stops on a question, while you're away from the computer, the plugin tells Hark's agents on the machine (Hermes with Hark's `hark-auth` plugin 2.0 or later, and Hark's own agent, each when it's there) that its workspace changed, all at once. Each pushes only to the phones paired with it. The agent reads the workspace's agents again and pushes the change to your phone: "apple-models in hark needs you", with the question's options as buttons. A tap opens that workspace's page in Hark, where the agent shows as waiting, with its question as a card.
 
 ```
 herdr plugin install shanev/herdr-voice/plugins/desk-alerts

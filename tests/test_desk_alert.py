@@ -287,14 +287,19 @@ class Settings(unittest.TestCase):
 
 
 class EveryAgent(unittest.TestCase):
-    """Each agent on the machine serves Hark its own stream, so each hears of every change; only the first may push it,
-    so a phone paired with both isn't told twice."""
+    """Each agent on the machine serves Hark its own stream, so each hears of every change, at once: one that's slow or
+    down holds up none of the others. Each may push it: an agent pushes only to the phones paired with it, and which
+    agent that is (the computer the phone pairs) isn't this plugin's to know."""
 
     AGENTS = {"agents": [{"url": "http://hermes", "key": "h"}, {"url": "http://hark-agent", "key": "a"}]}
 
-    def run_changed(self, *args, fail=()):
+    def run_changed(self, *args, fail=(), slow=(), started=None):
         sent = []
         def post(url, key, body, timeout):
+            if started is not None:
+                started[url] = time.monotonic()
+            if url.startswith(slow):
+                time.sleep(1)
             sent.append((url, key, body))
             if url.startswith(fail):
                 raise desk_alert.urllib.error.URLError("down")
@@ -312,15 +317,24 @@ class EveryAgent(unittest.TestCase):
             ("http://hark-agent/v1/skills/herdr-voice/changed", "a", {"context": "w1", "item": "w1:p1", "push": False})])
         self.assertEqual([body for _, _, body in self.run_changed(None, None, False)], [{"push": False}, {"push": False}])
 
-    def test_only_the_first_agent_may_push(self):
-        self.assertEqual([(url, body) for url, _, body in self.run_changed("w1", "w1:p1")], [
-            ("http://hermes/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1"}),
-            ("http://hark-agent/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1", "push": False})])
+    def test_every_agent_may_push(self):
+        # Hermes left installed after the phone moved to Hark's agent must not be the only one allowed to push.
+        self.assertEqual(sorted((url, body) for url, _, body in self.run_changed("w1", "w1:p1")), [
+            ("http://hark-agent/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1"}),
+            ("http://hermes/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1"})])
 
     def test_one_agent_down_doesnt_stop_the_others(self):
         sent = self.run_changed("w1", "w1:p1", False, fail=("http://hermes",))
-        self.assertEqual([url for url, _, _ in sent], ["http://hermes/v1/skills/herdr-voice/changed",
-                                                         "http://hark-agent/v1/skills/herdr-voice/changed"])
+        self.assertEqual(sorted(url for url, _, _ in sent), ["http://hark-agent/v1/skills/herdr-voice/changed",
+                                                             "http://hermes/v1/skills/herdr-voice/changed"])
+
+    def test_a_slow_agent_doesnt_hold_up_the_others(self):
+        started, begun = {}, time.monotonic()
+        sent = self.run_changed("w1", "w1:p1", False, slow=("http://hermes",), started=started)
+        self.assertLess(started["http://hark-agent/v1/skills/herdr-voice/changed"] - begun, 0.3)
+        # Hark's agent was told while Hermes was still answering; the hook still waits for both before it exits.
+        self.assertEqual([url for url, _, _ in sent], ["http://hark-agent/v1/skills/herdr-voice/changed",
+                                                       "http://hermes/v1/skills/herdr-voice/changed"])
 
 
 class Settling(unittest.TestCase):

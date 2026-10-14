@@ -1,6 +1,6 @@
 id = "herdr-voice.desk-alerts"
 name = "Desk alerts"
-version = "0.5.1"
+version = "0.5.2"
 min_herdr_version = "0.9.3"
 description = "Tell Hark when agents and workspaces change, and push when an agent finishes or stops on a question while you're away."
 platforms = ["macos", "linux"]
