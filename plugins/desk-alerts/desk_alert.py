@@ -35,6 +35,8 @@ SKILL = "herdr-voice"
 # herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off.
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
+# A finish this soon after a handed-off one is the same task (Claude ended a reply, worked on, ended again).
+SAME_TASK_SECONDS = 10 * 60
 DEFAULT_AWAY_MINUTES = 5
 DEFAULT_PORT = 8642
 HARK_AGENT = Path.home() / ".hark-agent"
@@ -141,7 +143,16 @@ def take_hand_off(names, now, folder=HANDED_OFF):
             pass
     if not handed_off:
         for name in filter(None, names):
-            folder.joinpath(name.replace("/", "_") + ".finished").unlink(missing_ok=True)
+            finished = folder.joinpath(name.replace("/", "_") + ".finished")
+            try:
+                if now - finished.stat().st_mtime < SAME_TASK_SECONDS:
+                    # The same handed-off task finishing again: still Hermes' to tell.
+                    os.utime(finished, (now, now))
+                    handed_off = True
+                else:
+                    finished.unlink()
+            except FileNotFoundError:
+                pass
     return handed_off
 
 
