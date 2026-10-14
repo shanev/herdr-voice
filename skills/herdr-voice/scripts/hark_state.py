@@ -127,6 +127,13 @@ def create(name, machine=None):
                         "location": machine or this_machine()}}
 
 
+def plain(text):
+    """Text without icon-font glyphs (Nerd Fonts' private-use characters, which a phone can't show and speech would
+    read), spaces folded."""
+    kept = "".join(c for c in text or "" if not (0xE000 <= ord(c) <= 0xF8FF or ord(c) >= 0xF0000))
+    return " ".join(kept.split())
+
+
 def screen_text(screen):
     """The screen without trailing spaces and blank lines, newest 6000 characters (as desk-alerts sends it)."""
     lines = [line.rstrip() for line in screen.splitlines()]
@@ -158,16 +165,17 @@ def agent_items(machine, workspace=None):
     items = []
     for agent in agents:
         pane = panes.get(agent["pane_id"]) or {}
-        # A pane's label is its terminal title until it's renamed (by the user, or a plugin such as Auto Title).
-        label = pane.get("label") if pane.get("label") and pane.get("label") != pane.get("terminal_title_stripped") else None
+        # A pane's label is its terminal title (cut short) until it's renamed, by the user or a plugin such as Auto Title.
+        title = pane.get("terminal_title_stripped") or ""
+        label = pane.get("label") if pane.get("label") and not title.startswith(pane["label"]) else None
         siblings = [t for t in tabs if t.get("workspace_id") == agent.get("workspace_id")]
         tab = next((t for t in siblings if t["tab_id"] == agent.get("tab_id")), None)
         where = (tab.get("label") if tab and tab.get("label") and not tab["label"][:1].isdigit() else
                  str(siblings.index(tab) + 1) if tab else "")
         kind = (agent.get("agent") or "agent").capitalize()
-        name = agent.get("name") or label or (f"{kind} · {where}" if where else kind)
+        name = plain(agent.get("name") or label or "") or (f"{kind} · {where}" if where else kind)
         state = STATES.get(agent.get("agent_status"), "idle")
-        item = {"id": agent["pane_id"], "name": name, "state": state, "detail": agent.get("terminal_title_stripped") or ""}
+        item = {"id": agent["pane_id"], "name": name, "state": state, "detail": plain(agent.get("terminal_title_stripped"))}
         if state == "waiting":
             try:
                 screen = screen_text(herdr("agent", "read", agent["pane_id"], "--source", "visible", machine=machine))
@@ -178,6 +186,13 @@ def agent_items(machine, workspace=None):
         elif state == "done" and agent.get("completion_seq") is not None and not handed_off(agent, now):
             item["card"] = {"kind": "result", "id": f"{agent['pane_id']}:{agent['completion_seq']}"}
         items.append((joined(machine, agent.get("workspace_id", "")), item))
+    # Two agents a person couldn't tell apart (two unnamed omps in one tab): the second is "Omp · 1 · 2", and so on.
+    seen = {}
+    for context, item in items:
+        key = (context, item["name"])
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] > 1:
+            item["name"] = f"{item['name']} · {seen[key]}"
     return items
 
 

@@ -172,6 +172,35 @@ class HarkState(unittest.TestCase):
         self.run_state("realert", "w5M:p2", check=False)
         self.assertEqual((plugin / "ran").read_text(), "realert w5M:p2")
 
+    def test_names_tell_agents_apart_and_a_cut_title_is_no_label(self):
+        # Two unnamed omps in one tab; a pane whose label is only its terminal title cut short (herdr does that at 50).
+        title = "Build SAFT investor reconciliation table for the auditors"
+        self.answers["|agent list"] = result({"agents": [
+            {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p1", "tab_id": "w7F:t1", "workspace_id": "w7F",
+             "terminal_title_stripped": "One"},
+            {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p3", "tab_id": "w7F:t1", "workspace_id": "w7F",
+             "terminal_title_stripped": "Two"},
+            {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p4", "tab_id": "w7F:t1", "workspace_id": "w7F",
+             "terminal_title_stripped": title}]})
+        self.answers["|pane list"] = result({"panes": [{"pane_id": "w7F:p4", "label": title[:50],
+                                                         "terminal_title_stripped": title}]})
+        self.answers["|tab list"] = result({"tabs": [{"tab_id": "w7F:t1", "workspace_id": "w7F", "label": "1 · x"}]})
+        names = [i["name"] for i in self.run_state("items", "w7F")["items"]]
+        self.assertEqual(len(set(names)), 3, names)
+        self.assertEqual(names[0], "Omp · 1")
+        self.assertNotIn(title[:50], names, "A cut terminal title isn't the user's label")
+
+    def test_icon_font_glyphs_are_dropped(self):
+        # Nerd Font icons (private use) have no glyph on the phone, and speech would read them.
+        self.answers["|agent list"] = result({"agents": [
+            {"agent": "omp", "agent_status": "working", "pane_id": "w7F:p1", "tab_id": "w7F:t1", "workspace_id": "w7F",
+             "name": "clip\U000f03e2", "terminal_title_stripped": "π > \U000f03e2 CLIP: Improve MOLLE clip design \ue0b0"}]})
+        self.answers["|pane list"] = result({"panes": []})
+        self.answers["|tab list"] = result({"tabs": [{"tab_id": "w7F:t1", "workspace_id": "w7F", "label": "1 · x"}]})
+        [item] = self.run_state("items", "w7F")["items"]
+        self.assertEqual(item["detail"], "π > CLIP: Improve MOLLE clip design")
+        self.assertEqual(item["name"], "clip")
+
     def test_herdr_failing_is_an_error_not_an_empty_list(self):
         del self.answers["|agent list"]
         failed = self.run_state("items", "w5M", check=False)
