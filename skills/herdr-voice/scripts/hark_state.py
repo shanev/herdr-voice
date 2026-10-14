@@ -17,8 +17,9 @@ name, else one labelled with the name; on the given machine if it isn't this one
 items: the agents in a workspace, or in every workspace each with its "context", as {"items": [...]}: herdr's status
 as working, waiting (blocked on a question), done, idle; the terminal title as the detail line; for a blocked agent,
 a question card with its screen (Hark reads the question from it); for a done agent whose finish no one has told
-the user yet, a result card. An agent herdr-voice handed off (its mark in ~/.cache/herdr-voice/handed-off) gets no
-result card: Hermes reports that one in the conversation.
+the user yet, a result card, with the start of its last reply (Claude Code and Codex, on this machine). An agent
+herdr-voice handed off (its mark in ~/.cache/herdr-voice/handed-off) gets no result card: Hermes reports that one in
+the conversation.
 
 realert: has the desk-alerts plugin alert again for a pane whose dialog moved on to another question.
 
@@ -32,10 +33,16 @@ import sys
 import time
 from pathlib import Path
 
+# last_reply.py beside this script, however it's loaded.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from last_reply import last_reply  # noqa: E402
+
 STATES = {"working": "working", "blocked": "waiting", "done": "done", "idle": "idle"}
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
 MACHINE_TIMEOUT = 8
+# The start of a result Hark shows on the agent's row (its first line or two); Hear gets the whole of it.
+RESULT_TEXT = 300
 
 
 class HerdrError(Exception):
@@ -174,6 +181,19 @@ def handed_off(agent, now):
     return False
 
 
+def result_start(agent):
+    """The start of the agent's last reply, from its session file (Claude Code, Codex); None for other kinds."""
+    try:
+        reply = (last_reply(agent, Path.home()) or "").strip()
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if len(reply) <= RESULT_TEXT:
+        return reply or None
+    cut = reply[:RESULT_TEXT]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > 0 else cut).rstrip() + "…"
+
+
 def agent_items(machine, workspace=None):
     """The agents on a machine, in one workspace or all, with the context each belongs to."""
     agents = herdr_json("agent", "list", machine=machine)["agents"]
@@ -207,6 +227,10 @@ def agent_items(machine, workspace=None):
                 item["card"] = {"kind": "question", "id": hashlib.sha256(screen.encode()).hexdigest()[:16], "screen": screen}
         elif state == "done" and agent.get("completion_seq") is not None and not handed_off(agent, now):
             item["card"] = {"kind": "result", "id": f"{agent['pane_id']}:{agent['completion_seq']}"}
+            # Session files are this machine's: another machine's agent's result is only heard.
+            text = result_start(agent) if machine is None else None
+            if text:
+                item["card"]["text"] = text
         items.append((joined(machine, agent.get("workspace_id", "")), item))
     # Two agents a person couldn't tell apart (two unnamed omps in one tab): the second is "Omp · 1 · 2", and so on.
     seen = {}

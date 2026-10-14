@@ -19,7 +19,9 @@ class Manifest(unittest.TestCase):
         manifest = tomllib.loads((PLUGIN / "herdr-plugin.toml").read_text(encoding="utf-8"))
         hook = ["python3", "desk_alert.py"]
         self.assertEqual(manifest["events"], [{"on": on, "command": hook} for on in
-                                              ("pane.agent_status_changed", "pane.closed", "pane.exited", "pane.moved")])
+                                              ("pane.agent_status_changed", "pane.agent_detected", "pane.closed", "pane.exited",
+                                               "pane.moved", "workspace.created", "workspace.closed", "workspace.renamed",
+                                               "workspace.moved", "workspace.reordered")])
 
 
 class Transitions(unittest.TestCase):
@@ -44,9 +46,8 @@ class Transitions(unittest.TestCase):
 CHANGED = "http://hermes/v1/skills/herdr-voice/changed"
 
 
-class Resolved(unittest.TestCase):
-    """A question is over once its pane leaves `blocked` or goes away: the agent is told its workspace changed, once,
-    and withdraws the question."""
+class Hook(unittest.TestCase):
+    """Runs the hook for herdr events, recording what it posts."""
 
     def run_hook(self, events, statuses=()):
         sent = []
@@ -72,14 +73,21 @@ class Resolved(unittest.TestCase):
     def status(self, pane, status):
         return {"type": "pane_agent_status_changed", "pane_id": pane, "agent_status": status, "workspace_id": "w1"}
 
+
+class Resolved(Hook):
+    """A question is over once its pane leaves `blocked` or goes away: the agent is told its workspace changed, once,
+    and withdraws the question."""
+
     def test_answered_or_quit_resolves_the_question(self):
         for status in ("working", "done", "idle"):
             sent = self.run_hook([self.status("w1:p1", status)], [("w1:p1", "working"), ("w1:p1", "blocked")])
             self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1"})], status)
 
     def test_only_a_blocked_pane_has_a_question(self):
-        self.assertEqual(self.run_hook([self.status("w1:p1", "done")], [("w1:p1", "working")]), [])
-        self.assertEqual(self.run_hook([self.status("w1:p1", "blocked")], [("w1:p1", "working")]), [])
+        # Not a resolved question: the change is only for Hark's open stream (an alert, if any, comes once settled).
+        for status in ("done", "blocked"):
+            self.assertEqual(self.run_hook([self.status("w1:p1", status)], [("w1:p1", "working")]),
+                             [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False})], status)
 
     def test_a_closed_exited_or_moved_pane_resolves_its_question(self):
         for data in ({"type": "pane_closed", "pane_id": "w1:p1", "workspace_id": "w1"},
@@ -89,7 +97,11 @@ class Resolved(unittest.TestCase):
             sent = self.run_hook([data, data], [("w1:p1", "blocked")])
             self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1"})], data["type"])
         closed = {"type": "pane_closed", "pane_id": "w1:p1", "workspace_id": "w1"}
-        self.assertEqual(self.run_hook([closed], [("w1:p1", "done")]), [])
+        # An agent's pane that wasn't asking: gone from Hark's list, nothing to withdraw or push.
+        self.assertEqual(self.run_hook([closed, closed], [("w1:p1", "done")]),
+                         [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False})])
+        # A pane that never had an agent isn't on Hark's list.
+        self.assertEqual(self.run_hook([closed]), [])
 
     def test_a_gateway_without_skill_state_is_skipped(self):
         def refuse(url, key, body, timeout):
@@ -100,6 +112,34 @@ class Resolved(unittest.TestCase):
             desk_alert.changed({"key": "k", "url": "http://hermes"}, "w1", "w1:p1")
         finally:
             desk_alert.post = original
+
+
+class Reports(Hook):
+    """Hark doesn't poll: every change it shows is reported at once, for its open stream only (`push: false`)."""
+
+    def test_every_status_change_is_reported_at_once(self):
+        sent = self.run_hook([self.status("w1:p1", "idle"), self.status("w1:p1", "working"), self.status("w1:p1", "working"),
+                              self.status("w1:p1", "done"), self.status("w1:p1", "idle")])
+        stream = (CHANGED, {"context": "w1", "item": "w1:p1", "push": False})
+        # The repeated status isn't a change.
+        self.assertEqual(sent, [stream] * 4)
+
+    def test_an_agent_detected_or_released_is_reported(self):
+        for agent in ("claude", None):
+            sent = self.run_hook([{"type": "pane_agent_detected", "pane_id": "w1:p3", "workspace_id": "w1", "agent": agent}])
+            self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p3", "push": False})], agent)
+
+    def test_workspaces_made_closed_renamed_or_moved_report_the_contexts(self):
+        events = [{"type": "workspace_created", "workspace": {"workspace_id": "w7"}},
+                  {"type": "workspace_closed", "workspace_id": "w7", "workspace": None},
+                  {"type": "workspace_renamed", "workspace_id": "w1", "label": "hark"},
+                  {"type": "workspace_moved", "workspace_id": "w1", "insert_index": 0, "workspaces": []},
+                  {"type": "workspace_reordered", "workspace_ids": ["w1"], "workspaces": []}]
+        for event in events:
+            self.assertEqual(self.run_hook([event]), [(CHANGED, {"push": False})], event["type"])
+
+    def test_a_focused_workspace_is_no_change(self):
+        self.assertEqual(self.run_hook([{"type": "workspace_focused", "workspace_id": "w1"}]), [])
 
 
 class Alerting(unittest.TestCase):
@@ -131,7 +171,9 @@ class Alerting(unittest.TestCase):
             for n, f in original.items():
                 setattr(desk_alert, n, f)
             os.environ.pop("HERDR_PLUGIN_EVENT_JSON", None)
-        self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1"})])
+        # Each status for Hark's open stream at once, then the settled alert, which may push.
+        self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False})] * 2
+                         + [(CHANGED, {"context": "w1", "item": "w1:p1"})])
 
 
 class HandOffs(unittest.TestCase):

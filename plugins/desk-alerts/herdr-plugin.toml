@@ -1,12 +1,16 @@
 id = "herdr-voice.desk-alerts"
 name = "Desk alerts"
-version = "0.4.0"
+version = "0.5.0"
 min_herdr_version = "0.9.3"
-description = "Tell Hark when an agent finishes or stops on a question while you're away."
+description = "Tell Hark when agents and workspaces change, and push when an agent finishes or stops on a question while you're away."
 platforms = ["macos", "linux"]
 
 [[events]]
 on = "pane.agent_status_changed"
+command = ["python3", "desk_alert.py"]
+
+[[events]]
+on = "pane.agent_detected"
 command = ["python3", "desk_alert.py"]
 
 [[events]]
@@ -19,4 +23,24 @@ command = ["python3", "desk_alert.py"]
 
 [[events]]
 on = "pane.moved"
+command = ["python3", "desk_alert.py"]
+
+[[events]]
+on = "workspace.created"
+command = ["python3", "desk_alert.py"]
+
+[[events]]
+on = "workspace.closed"
+command = ["python3", "desk_alert.py"]
+
+[[events]]
+on = "workspace.renamed"
+command = ["python3", "desk_alert.py"]
+
+[[events]]
+on = "workspace.moved"
+command = ["python3", "desk_alert.py"]
+
+[[events]]
+on = "workspace.reordered"
 command = ["python3", "desk_alert.py"]
