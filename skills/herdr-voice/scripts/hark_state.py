@@ -6,13 +6,13 @@ Usage: hark_state.py contexts
        hark_state.py items [workspace]
        hark_state.py realert <pane>
 
-contexts: this machine's herdr workspaces and those on herdr's enabled saved machines (`herdr machine list`), as
-{"contexts": [{"id", "name", "location"}]}. A workspace on another machine has the id `<machine>/<workspace id>`, and
-its location is the machine's label; this machine's location is its host name. A machine that doesn't answer is
-left out.
+contexts: this machine's herdr workspaces, as {"contexts": [{"id", "name", "location"}]}, the location its host name.
+Another of herdr's saved machines shows in Hark when it's paired as a computer of its own: the desk alerts there
+report its changes, which this machine's never hear of.
 
 create: a workspace for a repo (found as ~/<repo>, ~/github.com/*/<repo> or ~/*/<repo>, or a path), labelled with its
-name, else one labelled with the name; on the given machine if it isn't this one. Prints {"context": {...}}.
+name, else one labelled with the name; on the given machine if it isn't this one (its id is then
+`<machine>/<workspace id>`). Prints {"context": {...}}.
 
 items: the agents in a workspace, or in every workspace each with its "context", as {"items": [...]}: herdr's status
 as working, waiting (blocked on a question), done, idle; the terminal title as the detail line; for a blocked agent,
@@ -40,7 +40,6 @@ from last_reply import last_reply  # noqa: E402
 STATES = {"working": "working", "blocked": "waiting", "done": "done", "idle": "idle"}
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
-MACHINE_TIMEOUT = 8
 # The start of a result Hark shows on the agent's row (its first line or two); Hear gets the whole of it.
 RESULT_TEXT = 300
 
@@ -78,12 +77,6 @@ def machines():
     return [m["label"] for m in listed if isinstance(m, dict) and m.get("enabled") and m.get("label")]
 
 
-def split(context):
-    """A context id as (machine or None, workspace id)."""
-    machine, _, workspace = context.rpartition("/")
-    return (machine or None), workspace
-
-
 def joined(machine, workspace):
     return f"{machine}/{workspace}" if machine else workspace
 
@@ -93,17 +86,9 @@ def workspace_name(workspace):
 
 
 def contexts():
-    found = []
     here = this_machine()
-    for workspace in herdr_json("workspace", "list")["workspaces"]:
-        found.append({"id": workspace["workspace_id"], "name": workspace_name(workspace), "location": here})
-    for machine in machines():
-        try:
-            listed = herdr_json("workspace", "list", machine=machine, timeout=MACHINE_TIMEOUT)["workspaces"]
-        except (HerdrError, ValueError, KeyError, TypeError):
-            continue
-        found += [{"id": joined(machine, w["workspace_id"]), "name": workspace_name(w), "location": machine} for w in listed]
-    return {"contexts": found}
+    return {"contexts": [{"id": w["workspace_id"], "name": workspace_name(w), "location": here}
+                         for w in herdr_json("workspace", "list")["workspaces"]]}
 
 
 def find_repo(name):
@@ -244,15 +229,8 @@ def agent_items(machine, workspace=None):
 
 def items(context=None):
     if context is not None:
-        machine, workspace = split(context)
-        return {"items": [item for _, item in agent_items(machine, workspace)]}
-    found = agent_items(None)
-    for machine in machines():
-        try:
-            found += agent_items(machine)
-        except (HerdrError, ValueError, KeyError, TypeError):
-            continue
-    return {"items": [{**item, "context": context} for context, item in found]}
+        return {"items": [item for _, item in agent_items(None, context)]}
+    return {"items": [{**item, "context": context} for context, item in agent_items(None)]}
 
 
 def realert(pane):

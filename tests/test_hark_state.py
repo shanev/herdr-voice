@@ -121,18 +121,16 @@ class HarkState(unittest.TestCase):
         log = self.bin / "calls.log"
         return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
-    def test_contexts_are_this_machines_workspaces_and_those_on_saved_machines(self):
+    def test_contexts_are_this_machines_workspaces_only(self):
         here = self.run_state("contexts")["contexts"]
         local = os.uname().nodename.split(".")[0]
         self.assertEqual(here, [
             {"id": "w1P", "name": "asterism", "location": local},
             {"id": "w5M", "name": "hark", "location": local},
             {"id": "w9", "name": "Workspace w9", "location": local},
-            {"id": "vega@vega/w2", "name": "hark", "location": "vega@vega"},
         ])
-        # A disabled machine isn't asked; one that doesn't answer is left out.
-        self.assertNotIn("old", [c["machine"] for c in self.calls()])
-        self.assertIn("gone", [c["machine"] for c in self.calls()])
+        # Another machine's workspaces are that machine's computer's in Hark: its own desk alerts report them live.
+        self.assertEqual([c for c in self.calls() if c["machine"] or c["args"][:1] == ["machine"]], [])
 
     def test_items_are_the_workspaces_agents(self):
         items = self.run_state("items", "w5M")["items"]
@@ -150,17 +148,12 @@ class HarkState(unittest.TestCase):
             {"id": "w5M:p5", "name": "handed", "state": "done", "detail": "Tests pass"},
         ])
 
-    def test_items_on_another_machine_ask_that_machine(self):
-        items = self.run_state("items", "vega@vega/w2")["items"]
-        self.assertEqual(items, [{"id": "w2:p1", "name": "Claude · 1", "state": "working", "detail": "Port"}])
-        self.assertTrue(all(c["machine"] == "vega@vega" for c in self.calls()))
-
     def test_items_of_every_workspace_say_theirs(self):
         items = self.run_state("items")["items"]
         self.assertEqual([(i["context"], i["id"]) for i in items], [
-            ("w5M", "w5M:p1"), ("w5M", "w5M:p2"), ("w5M", "w5M:p3"), ("w5M", "w5M:p4"), ("w1P", "w1P:p8"), ("w5M", "w5M:p5"),
-            ("vega@vega/w2", "w2:p1")])
+            ("w5M", "w5M:p1"), ("w5M", "w5M:p2"), ("w5M", "w5M:p3"), ("w5M", "w5M:p4"), ("w1P", "w1P:p8"), ("w5M", "w5M:p5")])
         self.assertEqual(next(i for i in items if i["id"] == "w1P:p8")["state"], "idle")
+        self.assertEqual([c for c in self.calls() if c["machine"] or c["args"][:1] == ["machine"]], [])
 
     def test_create_finds_the_repo_and_opens_its_workspace_without_focus(self):
         self.answers["|workspace list"] = result({"workspaces": [w for w in WORKSPACES if w.get("label") != "hark"]})
