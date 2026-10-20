@@ -20,7 +20,7 @@ another question.
 Settings, all optional, in this plugin's config dir `.env` (`herdr plugin config-dir herdr-voice.desk-alerts`):
 AWAY_AFTER_MINUTES (default 5; 0 alerts even at the desk), SETTLE_SECONDS (default 20), HERMES_API_URL and
 HERMES_API_KEY (an agent to tell first, besides Hermes (API_SERVER_PORT and API_SERVER_KEY in ~/.hermes/.env) and Hark's
-agent (PORT and key in ~/.hark-agent), each told when it's there). Stdlib only.
+agent (PORT and key in ~/.vux-agent, or ~/.hark-agent from before Hark became Vux), each told when it's there). Stdlib only.
 """
 import fcntl
 import json
@@ -43,7 +43,8 @@ HAND_OFF_TTL = 12 * 60 * 60
 SAME_TASK_SECONDS = 10 * 60
 DEFAULT_AWAY_MINUTES = 5
 DEFAULT_PORT = 8642
-HARK_AGENT = Path.home() / ".hark-agent"
+# Vux's own agent, and where it lived while Vux was called Hark: the first of them with a key is the one.
+VUX_AGENT_HOMES = (Path.home() / ".vux-agent", Path.home() / ".hark-agent")
 DEFAULT_HARK_AGENT_PORT = 8650
 # Claude can end a reply while a command it started is still running: done, then working again.
 # An alert waits this long and is dropped if the agent went back to work.
@@ -195,7 +196,7 @@ def read_key(path):
         return ""
 
 
-def settings(config_dir, hermes_env, hark_agent=HARK_AGENT):
+def settings(config_dir, hermes_env, hark_agent=None):
     """Every agent on the machine, each serving Hark its own stream: one named in this plugin's `.env` first, then
     Hermes, then Hark's own agent, each once."""
     own, hermes = read_env_file(Path(config_dir) / ".env"), read_env_file(hermes_env)
@@ -205,7 +206,9 @@ def settings(config_dir, hermes_env, hark_agent=HARK_AGENT):
         agents.append({"url": own["HERMES_API_URL"], "key": own.get("HERMES_API_KEY") or hermes_key})
     if hermes_key:
         agents.append({"url": "http://127.0.0.1:{}".format(hermes.get("API_SERVER_PORT") or DEFAULT_PORT), "key": hermes_key})
-    agent_key = read_key(Path(hark_agent) / "agent-key")
+    homes = [Path(hark_agent)] if hark_agent is not None else list(VUX_AGENT_HOMES)
+    hark_agent = next((home for home in homes if read_key(home / "agent-key")), homes[0])
+    agent_key = read_key(hark_agent / "agent-key")
     if agent_key:
         agents.append({"url": "http://127.0.0.1:{}".format(
             read_env_file(Path(hark_agent) / "env").get("PORT") or DEFAULT_HARK_AGENT_PORT), "key": agent_key})
@@ -334,7 +337,7 @@ def main():
     if not alert or agent is None or take_hand_off([pane, agent.get("name")], time.time()):
         return
     if not config["agents"]:
-        print("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.hark-agent/agent-key)", file=sys.stderr)
+        print("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.vux-agent/agent-key)", file=sys.stderr)
         return
     ioreg = subprocess.run(["ioreg", "-c", "IOHIDSystem"], capture_output=True, text=True).stdout \
         if sys.platform == "darwin" else ""
@@ -368,7 +371,7 @@ def realert(pane):
     state = state_dir()
     config = config_for(state)
     if not config["agents"]:
-        sys.exit("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.hark-agent/agent-key)")
+        sys.exit("desk-alerts: no agent API key (API_SERVER_KEY in ~/.hermes/.env, or ~/.vux-agent/agent-key)")
     deliver_detached(state, config, pane, "blocked", latest_event(state / "statuses.json", pane))
     print("The next question will come as a new alert.")
 
