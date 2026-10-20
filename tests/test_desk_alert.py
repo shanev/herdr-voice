@@ -5,6 +5,7 @@ import tempfile
 import time
 import tomllib
 import unittest
+from unittest import mock
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parent.parent / "plugins" / "desk-alerts"
@@ -284,6 +285,23 @@ class Settings(unittest.TestCase):
             self.assertEqual(desk_alert.settings(folder, hermes, agent)["agents"],
                              [{"url": "http://127.0.0.1:8642", "key": "secret"}, {"url": "http://127.0.0.1:8650", "key": "agent-secret"}])
             self.assertEqual(desk_alert.settings(folder, folder / "no-hermes.env", folder / "none")["agents"], [])
+
+    def test_vux_agent_then_the_one_from_before_the_rename(self):
+        """Vux's agent lives in ~/.vux-agent; one installed while Vux was called Hark stays in ~/.hark-agent until
+        setup runs again and moves it."""
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            vux, hark = folder / ".vux-agent", folder / ".hark-agent"
+            hark.mkdir()
+            (hark / "agent-key").write_text("hark-secret\n", encoding="utf-8")
+            with mock.patch.object(desk_alert, "VUX_AGENT_HOMES", (vux, hark)):
+                self.assertEqual(desk_alert.settings(folder, folder / "no-hermes.env")["agents"],
+                                 [{"url": "http://127.0.0.1:8650", "key": "hark-secret"}])
+                vux.mkdir()
+                (vux / "agent-key").write_text("vux-secret\n", encoding="utf-8")
+                (vux / "env").write_text("PORT=8651\n", encoding="utf-8")
+                self.assertEqual(desk_alert.settings(folder, folder / "no-hermes.env")["agents"],
+                                 [{"url": "http://127.0.0.1:8651", "key": "vux-secret"}])
 
 
 class EveryAgent(unittest.TestCase):
