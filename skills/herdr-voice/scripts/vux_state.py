@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""herdr workspaces and their agents, for Hark: the skill state its SKILL.md declares (metadata.hark).
+"""herdr workspaces and their agents, for Vux: the skill state its SKILL.md declares (in metadata.hark, the name from
+before Hark became Vux, which Hark-era clients still need).
 
-Usage: hark_state.py contexts
-       hark_state.py create <repo-or-name> [machine]
-       hark_state.py items [workspace]
-       hark_state.py realert <pane>
+Usage: vux_state.py contexts
+       vux_state.py create <repo-or-name> [machine]
+       vux_state.py items [workspace]
+       vux_state.py realert <pane>
 
 contexts: this machine's herdr workspaces, as {"contexts": [{"id", "name", "location"}]}, the location its host name;
 the home folder's workspace (labelled "~") is "Home".
-Another of herdr's saved machines shows in Hark when it's paired as a computer of its own: the desk alerts there
+Another of herdr's saved machines shows in Vux when it's paired as a computer of its own: the desk alerts there
 report its changes, which this machine's never hear of.
 
 create: a workspace for a repo (found as ~/<repo>, ~/github.com/*/<repo> or ~/*/<repo>, or a path), labelled with its
@@ -17,7 +18,7 @@ name, else one labelled with the name; on the given machine if it isn't this one
 
 items: the agents in a workspace, or in every workspace each with its "context", as {"items": [...]}: herdr's status
 as working, waiting (blocked on a question), done, idle; named as `item_name` says, often for what it's working on, with
-its kind as the detail line; for a blocked agent, a question card with its screen (Hark reads the question from it); for
+its kind as the detail line; for a blocked agent, a question card with its screen (Vux reads the question from it); for
 a done agent whose finish no one has told the user yet, a result card, with the start of its last reply (Claude Code
 and Codex, on this machine). An agent herdr-voice handed off (its mark in ~/.cache/herdr-voice/handed-off) gets no
 result card: Hermes reports that one in the conversation.
@@ -45,7 +46,7 @@ from last_reply import last_reply  # noqa: E402
 STATES = {"working": "working", "blocked": "waiting", "done": "done", "idle": "idle"}
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
-# The start of a result Hark shows on the agent's row (its first line or two); Hear gets the whole of it.
+# The start of a result Vux shows on the agent's row (its first line or two); Hear gets the whole of it.
 RESULT_TEXT = 300
 # An item's name fits one line on a phone.
 NAME_LENGTH = 40
@@ -135,7 +136,7 @@ def create(name, machine=None):
     repo = find_repo(name) if machine is None else None
     label = repo.name if repo is not None else Path(name).name if name.startswith(("/", "~")) else name
     existing = herdr_json("workspace", "list", machine=machine)["workspaces"]
-    # By its label or the name Hark shows ("Home" for the home folder's "~").
+    # By its label or the name Vux shows ("Home" for the home folder's "~").
     same = next((w for w in existing if label.lower() in ((w.get("label") or "").lower(), workspace_name(w).lower())), None)
     if same:
         return {"context": {"id": joined(machine, same["workspace_id"]), "name": workspace_name(same),
@@ -203,7 +204,7 @@ def short(text, limit=NAME_LENGTH):
 
 
 def item_name(agent, label, title, where):
-    """What Hark calls an agent, the way the skill speaks of it: the name it was started with (herdr-voice's, taken from
+    """What Vux calls an agent, the way the skill speaks of it: the name it was started with (herdr-voice's, taken from
     the task), else its pane's label if someone renamed it, else what it's working on, else its kind and tab as herdr's
     sidebar shows them. The first two never change on their own; a title changes only with a new task."""
     kind = kind_name(agent.get("agent"))
@@ -305,7 +306,7 @@ def realert(pane):
     plugins = herdr_json("plugin", "list", "--json")["plugins"]
     root = next((p.get("plugin_root") for p in plugins if p.get("plugin_id") == "herdr-voice.desk-alerts"), None)
     if not root:
-        raise HerdrError("the desk-alerts plugin isn't installed: the next question shows when Hark next looks")
+        raise HerdrError("the desk-alerts plugin isn't installed: the next question shows when Vux next looks")
     subprocess.run([sys.executable, str(Path(root) / "desk_alert.py"), "realert", pane], check=True, timeout=30)
 
 
@@ -323,7 +324,7 @@ def main(argv):
             print(__doc__.strip(), file=sys.stderr)
             return 2
     except (HerdrError, ValueError, KeyError, TypeError) as error:
-        print(f"hark_state: {error}", file=sys.stderr)
+        print(f"vux_state: {error}", file=sys.stderr)
         return 1
     return 0
 

@@ -1,4 +1,4 @@
-"""scripts/hark_state.py end to end: the script runs as Hark's agent runs it (a subprocess, in the skill's folder), against
+"""scripts/vux_state.py end to end: the script runs as vux-agent runs it (a subprocess, in the skill's folder), against
 a stand-in `herdr` on PATH that answers from recorded JSON and logs every call."""
 import hashlib
 import json
@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent / "skills" / "herdr-voice"
-SCRIPT = "scripts/hark_state.py"
+SCRIPT = "scripts/vux_state.py"
 
 # The stand-in: `herdr [--machine M] <command...>` prints answers[<machine>|<command>] and logs the call. A missing
 # answer for a machine fails like an unreachable one.
@@ -66,11 +66,11 @@ WORKSPACES = [{"workspace_id": "w1P", "label": "asterism"}, {"workspace_id": "w5
               {"workspace_id": "wBE", "label": "~"}]
 
 
-# The start of the done Claude's last reply, for Hark's row: 300 characters at most, cut at a word.
+# The start of the done Claude's last reply, for Vux's row: 300 characters at most, cut at a word.
 RESULT_TEXT = "Opened #12 for the swipe fix.\nAll checks green.\n\n" + "More detail. " * 18 + "More detail.…"
 
 
-class HarkState(unittest.TestCase):
+class VuxState(unittest.TestCase):
     def setUp(self):
         self.folder = Path(tempfile.mkdtemp())
         self.bin = self.folder / "bin"
@@ -133,7 +133,7 @@ class HarkState(unittest.TestCase):
             # The home folder's workspace, labelled "~" by herdr.
             {"id": "wBE", "name": "Home", "location": local},
         ])
-        # Another machine's workspaces are that machine's computer's in Hark: its own desk alerts report them live.
+        # Another machine's workspaces are that machine's computer's in Vux: its own desk alerts report them live.
         self.assertEqual([c for c in self.calls() if c["machine"] or c["args"][:1] == ["machine"]], [])
 
     def test_items_are_the_workspaces_agents(self):
@@ -195,7 +195,7 @@ class HarkState(unittest.TestCase):
         self.assertEqual(self.run_state("create", "hark", "vega"),
                          {"context": {"id": "vega@vega/w2", "name": "hark", "location": "vega@vega"}})
         self.assertEqual(self.run_state("create", "Hark")["context"]["id"], "w5M")
-        # "Home", as Hark shows the home folder's workspace, is that one ("~").
+        # "Home", as Vux shows the home folder's workspace, is that one ("~").
         self.assertEqual(self.run_state("create", "home")["context"], {"id": "wBE", "name": "Home",
                                                                        "location": os.uname().nodename.split(".")[0]})
         self.assertFalse([c for c in self.calls() if c["args"][:2] == ["workspace", "create"]], "a second workspace")
@@ -234,7 +234,7 @@ class HarkState(unittest.TestCase):
         self.assertNotIn(title[:50], names, "A cut terminal title isn't the user's label")
 
     def test_unnamed_agents_are_named_for_their_task(self):
-        # Titles as Claude Code, omp, Grok and Codex set them (seen on a desk), and what Hark shows for each: the task
+        # Titles as Claude Code, omp, Grok and Codex set them (seen on a desk), and what Vux shows for each: the task
         # as the name, the kind below it.
         agents = [
             ("claude", "Tesla Roadster physics simulation", "/u/shanev/asterism"),

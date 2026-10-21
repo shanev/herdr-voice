@@ -20,17 +20,17 @@ metadata:
     contexts:
       list:
         - python3
-        - scripts/hark_state.py
+        - scripts/vux_state.py
         - contexts
       create:
         - python3
-        - scripts/hark_state.py
+        - scripts/vux_state.py
         - create
-      scope: "This conversation is about the herdr workspace '{name}' on {location} (Hark context {id}). Unless the user names another, new sessions go in it and the agents they mention are its agents. Load herdr-voice: its Hark section says how to reach it."
+      scope: "This conversation is about the herdr workspace '{name}' on {location} (Vux context {id}). Unless the user names another, new sessions go in it and the agents they mention are its agents. Load herdr-voice: its Vux section says how to reach it."
     items:
       list:
         - python3
-        - scripts/hark_state.py
+        - scripts/vux_state.py
         - items
       push:
         - waiting
@@ -40,7 +40,7 @@ metadata:
 
 # Herdr coding sessions, by voice
 
-The user talks to you through a voice app and is usually away from the screen. You run as a background service on the same machine as the user's Herdr server (Hermes' gateway, or Hark's own agent), not inside a Herdr pane. The `herdr` CLI reaches that server through its socket from any shell, so it works from here.
+The user talks to you through a voice app and is usually away from the screen. You run as a background service on the same machine as the user's Herdr server (Hermes' gateway, or Vux's own agent, vux-agent), not inside a Herdr pane. The `herdr` CLI reaches that server through its socket from any shell, so it works from here.
 
 ## You're outside Herdr, and that's expected
 
@@ -71,20 +71,20 @@ Short spoken phrases map to recipes below. Match them generously: speech-to-text
 
 X is an agent, matched as in **What's running**.
 
-## Hark
+## Vux
 
-Hark shows a page per Herdr workspace on this machine, with its agents, from `scripts/hark_state.py` (declared in this file's frontmatter; Hark's agent runs it, you don't). Another of Herdr's saved machines shows in Hark when the user pairs it as a computer of its own. A run from a workspace's page says in its instructions which workspace the conversation is about, with its id and the machine it's on.
+Vux, the voice app, shows a page per Herdr workspace on this machine, with its agents, from `scripts/vux_state.py` (declared in this file's frontmatter; Vux's agent runs it, you don't). Another of Herdr's saved machines shows in Vux when the user pairs it as a computer of its own. A run from a workspace's page says in its instructions which workspace the conversation is about, with its id and the machine it's on.
 
-- **The workspace from the instructions** is the one the user means. New sessions go in it as new tabs (step 3 of **Start a session**, with its id; skip `repo_workspace.py`), and "the Claude", "it" or "the agent" are agents in it, unless the user names another repo or workspace. The Hark context is the workspace id (`w5M`), on this machine. When the user asks for work on another machine by name, that's one of Herdr's saved machines (`herdr machine list`): put `--machine <machine>` right after `herdr` in every herdr command for it (`herdr --machine vega@vega agent list`). Never `ssh` to the machine: Herdr reaches it. Its repo paths are that machine's.
+- **The workspace from the instructions** is the one the user means. New sessions go in it as new tabs (step 3 of **Start a session**, with its id; skip `repo_workspace.py`), and "the Claude", "it" or "the agent" are agents in it, unless the user names another repo or workspace. The Vux context is the workspace id (`w5M`), on this machine. When the user asks for work on another machine by name, that's one of Herdr's saved machines (`herdr machine list`): put `--machine <machine>` right after `herdr` in every herdr command for it (`herdr --machine vega@vega agent list`). Never `ssh` to the machine: Herdr reaches it. Its repo paths are that machine's.
 - **Live state:** what the agents in the workspace are doing changes from minute to minute: read it with `herdr agent list` (and the screen or last reply) every time, never from memory or earlier in the conversation.
-- **[Card answer]:** a run that starts with `[Card answer]` is the user answering an agent's question from its card in Hark; it names the agent's pane id as its item. Read the screen (`herdr agent read <pane_id> --source visible`). If that question isn't showing anymore, it was answered at the desk: say so in a few words and do nothing else. Otherwise mark the agent as yours (the `touch` line in **Send a task**), answer it as **Answer a question** says, and read the screen again. If the agent asks another question now, run `rm -f ~/.cache/herdr-voice/handed-off/<pane_id>` and `python3 ${HERMES_SKILL_DIR}/scripts/hark_state.py realert <pane_id>` (`scripts/hark_state.py` in this skill's folder), and say only that you answered it. Otherwise hand off the wait as in **Send a task**, and say in a sentence that it's running.
+- **[Card answer]:** a run that starts with `[Card answer]` is the user answering an agent's question from its card in Vux; it names the agent's pane id as its item. Read the screen (`herdr agent read <pane_id> --source visible`). If that question isn't showing anymore, it was answered at the desk: say so in a few words and do nothing else. Otherwise mark the agent as yours (the `touch` line in **Send a task**), answer it as **Answer a question** says, and read the screen again. If the agent asks another question now, run `rm -f ~/.cache/herdr-voice/handed-off/<pane_id>` and `python3 ${HERMES_SKILL_DIR}/scripts/vux_state.py realert <pane_id>` (`scripts/vux_state.py` in this skill's folder), and say only that you answered it. Otherwise hand off the wait as in **Send a task**, and say in a sentence that it's running.
 - **[Card result]:** a run that starts with `[Card result]` asks for an agent's result: read it as in **Read the result** and report it as in **Reporting back by voice**.
 
 ## Recipes
 
 Every command prints JSON; read ids and states from it. For anything not covered here, print a command group's usage by running it without a subcommand (`herdr agent`, `herdr workspace`, `herdr tab`, `herdr pane`). Never run bare `herdr`: it opens the interactive UI.
 
-**What's running:** `herdr agent list`. When the user says "sessions" they mean these coding agents, not Herdr's server sessions (`herdr session list` is almost never what they want). Speak of each agent by its `name` when it has one ("apple-models in hark"); otherwise by its pane's label, if the pane has one ("the reviewer in hark"); otherwise by what it's working on, its `terminal_title_stripped` without the agent's own decoration (omp's `π >` and icons, Grok's `- grok`, Codex's `| <folder>`), which is how the voice app shows it ("the Tesla Roadster simulation Claude in asterism"); otherwise the way Herdr's sidebar shows it: workspace label and tab label ("asterism 2", labels from `herdr workspace list` and `herdr tab list --workspace <id>`). A title that only names the agent or its folder ("Claude Code") isn't a task. The workspace labelled `~` is the home folder's: call it "Home", as the voice app does. `herdr pane list` gives each pane's `label`, set with `herdr pane rename` by the user or a plugin such as Auto Title. A pane without one shows its terminal title there, so a `label` counts only when it differs from the pane's `terminal_title_stripped`. Never say a `pane_id` to the user. Then give its kind and state: idle or done means waiting for input, working, or blocked. To match the user's words back to a `pane_id`, try the names first ("the apple models agent" is `apple-models`, spoken with spaces for dashes), then pane labels ("the reviewer"), then what the agents are working on ("the Tesla Roadster one"; the voice app shows the start of it, about 40 characters, so match the start), and fall back to workspace and tab ("the asterism 2 agent", "the Claude in hark") only for agents with none of these.
+**What's running:** `herdr agent list`. When the user says "sessions" they mean these coding agents, not Herdr's server sessions (`herdr session list` is almost never what they want). Speak of each agent by its `name` when it has one ("apple-models in api"); otherwise by its pane's label, if the pane has one ("the reviewer in api"); otherwise by what it's working on, its `terminal_title_stripped` without the agent's own decoration (omp's `π >` and icons, Grok's `- grok`, Codex's `| <folder>`), which is how Vux shows it ("the Tesla Roadster simulation Claude in asterism"); otherwise the way Herdr's sidebar shows it: workspace label and tab label ("asterism 2", labels from `herdr workspace list` and `herdr tab list --workspace <id>`). A title that only names the agent or its folder ("Claude Code") isn't a task. The workspace labelled `~` is the home folder's: call it "Home", as Vux does. `herdr pane list` gives each pane's `label`, set with `herdr pane rename` by the user or a plugin such as Auto Title. A pane without one shows its terminal title there, so a `label` counts only when it differs from the pane's `terminal_title_stripped`. Never say a `pane_id` to the user. Then give its kind and state: idle or done means waiting for input, working, or blocked. To match the user's words back to a `pane_id`, try the names first ("the apple models agent" is `apple-models`, spoken with spaces for dashes), then pane labels ("the reviewer"), then what the agents are working on ("the Tesla Roadster one"; Vux shows the start of it, about 40 characters, so match the start), and fall back to workspace and tab ("the asterism 2 agent", "the Claude in api") only for agents with none of these.
 
 **What's waiting on me:** sweep every agent in `herdr agent list` and sort it into one of three groups:
 
@@ -96,7 +96,7 @@ Read each idle or done agent's last reply with `python3 ${HERMES_SKILL_DIR}/scri
 
 **One at a time** (the user says "let's go one by one", or after any triage report where their reply is ambiguous about which agent it answers): do the same sweep silently, but report only ONE agent — the first **Needs you** one, else the first **Finished** one — and end the turn. Their reply closes that agent (answer it to the agent, dismiss it, or "next"), then report the next one the same way. Never batch: a list makes "yes" ambiguous about which agent it answers. Keep the silent sweep's counts in mind and say "that's the last one" on the final agent.
 
-**Start a session** ("new Claude session for hark", "start omp in hark"). It works the same for every agent Herdr supports; `herdr agent start --help` lists the `--kind` values. Match the spoken agent to a kind (Cursor's is `cursor`, Antigravity's is `agy`). A request for a new session always means a new agent, even if one is already running in that repo, idle or not. Reuse an existing agent only when the user asks for it. Do it all without asking, in this order:
+**Start a session** ("new Claude session for website", "start omp in api"). It works the same for every agent Herdr supports; `herdr agent start --help` lists the `--kind` values. Match the spoken agent to a kind (Cursor's is `cursor`, Antigravity's is `agy`). A request for a new session always means a new agent, even if one is already running in that repo, idle or not. Reuse an existing agent only when the user asks for it. Do it all without asking, in this order:
 
 1. **Repo:** find its path, e.g. `~/<repo>` or `~/github.com/*/<repo>`. Ask only if more than one matches, or none does. Never create the repo's folder.
 2. **Workspace:** first decide whether the session gets its own worktree (see **Worktrees** below); if it does, skip to step 3. Otherwise a session for a repo goes in that repo's workspace. Run `python3 ${HERMES_SKILL_DIR}/scripts/repo_workspace.py <repo_path>` (`scripts/repo_workspace.py` in this skill's folder): it prints the workspace id to use. It matches an agent working in the repo, or a workspace labelled with the repo's name, and never a folder that only contains the repo. If it prints nothing (exit status 1), the repo has no workspace yet: create one in step 3, even when another workspace looks close. Never put a session in another repo's workspace.
@@ -108,7 +108,7 @@ Read each idle or done agent's last reply with `python3 ${HERMES_SKILL_DIR}/scri
    herdr worktree create --cwd <repo_path> --branch <branch> --base <base> --no-focus
    ```
 
-4. **Name:** derive a permanent name from the task, a short phrase the user would naturally say to refer to it, taken from their request: kebab-case, lowercase, no spaces, under about five words. Starting Claude on the Apple Foundation Models agent loops in hark gives `hark-apple-models` or just `apple-models`. If the user asks for a particular name, use theirs. Only when the request gives no usable phrase, or you're starting the session with an empty prompt, use `new-<pane>`: the `pane_id` in lowercase with `:` as `-` (`w1P:p8` → `new-w1p-p8`); pane ids are never reused, so it's always free.
+4. **Name:** derive a permanent name from the task, a short phrase the user would naturally say to refer to it, taken from their request: kebab-case, lowercase, no spaces, under about five words. Starting Claude on the Apple Foundation Models agent loops in api gives `api-apple-models` or just `apple-models`. If the user asks for a particular name, use theirs. Only when the request gives no usable phrase, or you're starting the session with an empty prompt, use `new-<pane>`: the `pane_id` in lowercase with `:` as `-` (`w1P:p8` → `new-w1p-p8`); pane ids are never reused, so it's always free.
 5. **Start:**
 
    ```bash
@@ -122,14 +122,14 @@ Read each idle or done agent's last reply with `python3 ${HERMES_SKILL_DIR}/scri
 
 6. **Keep the name:** never clear it. Herdr's sidebar shows it under "asterism · 2" instead of the agent's kind, and from then on it's how you and the user refer to the agent.
 
-Adding a tab leaves the agents already in that workspace alone: don't read, prompt, interrupt, or close them while starting the new one. Tell the user where the new agent is by its name and workspace ("apple-models is up in hark") and whether that's an existing workspace or a new one.
+Adding a tab leaves the agents already in that workspace alone: don't read, prompt, interrupt, or close them while starting the new one. Tell the user where the new agent is by its name and workspace ("apple-models is up in api") and whether that's an existing workspace or a new one.
 
 **Worktrees:** agents sharing one checkout get in each other's way: one switches branches or resets files under another. Give a new session its own worktree when another agent is already working in the repo's checkout (`python3 ${HERMES_SKILL_DIR}/scripts/repo_workspace.py --busy <repo_path>` prints their pane ids and exits 0; it exits 1 when there are none), or when the user names an issue or a branch for it. Otherwise use the repo's own checkout as above.
 
 - **Branch:** the one the user names; for an issue, `<number>-<short-title>` from `gh issue view <number>` (`24-swipe-crash`); otherwise the session's name from step 4, so derive that first.
 - **Base:** the remote's default branch, so the session starts from fresh code rather than whatever the checkout has: `git -C <repo_path> fetch -q origin`, then `git -C <repo_path> symbolic-ref --short refs/remotes/origin/HEAD` gives it (`origin/main`). If that fails, leave out `--base`: it then branches from the checkout's current commit. An existing branch is checked out as it is, and `--base` is ignored.
 - If `worktree create` fails because the branch is already checked out elsewhere, tell the user where instead of picking another branch.
-- When you tell the user where it is, say it's in its own worktree ("apple-models is up in its own worktree of hark"). If `git -C <repo_path> status --porcelain` prints anything, add that the worktree doesn't have the uncommitted changes in the main checkout. If the checkout has installed dependencies (`node_modules`, `.venv`, `target`, `.build`), add that the first build there may be slow while it installs them.
+- When you tell the user where it is, say it's in its own worktree ("apple-models is up in its own worktree of api"). If `git -C <repo_path> status --porcelain` prints anything, add that the worktree doesn't have the uncommitted changes in the main checkout. If the checkout has installed dependencies (`node_modules`, `.venv`, `target`, `.build`), add that the first build there may be slow while it installs them.
 - **Cleanup:** never remove a worktree on your own. Once its PR is merged, offer once to clean it up, and only on a yes run `herdr worktree remove --workspace <workspace_id>`: it closes that workspace with any agents in it and deletes the folder, and keeps the branch. If it fails with `dirty_worktree_requires_force`, tell the user it has uncommitted changes, and pass `--force` only if they say to throw them away.
 
 **Permission prompts:** the first time you start a session for this user, check your memory for their choice. If there's none, ask once: "Should coding sessions run with permission prompts off, so they never stop to ask?" Save the answer to memory and follow it from then on. With prompts on, a session that stops to ask shows as `blocked` (see below).
@@ -155,7 +155,7 @@ If `agent start` fails with `agent_not_ready` (blocked during startup), read the
 
 4. When the subagent's result arrives, report it as in "Reporting back by voice" below, naming the agent as in **What's running**. If the agent is blocked, tell the user its question in one sentence.
 
-Wait in your own turn instead only when the user asks you to ("do it and wait", "stay on it"): `herdr agent prompt <agent> "<task>" --wait --until done --until idle --until blocked --timeout 540000`, with the shell tool's `timeout=560` (Hermes and Hark's agent both cap it at 600 seconds). If that wait times out while the agent is still `working`, say it's still going and what it's doing, in one sentence from the latest output, then wait again with `herdr agent wait`.
+Wait in your own turn instead only when the user asks you to ("do it and wait", "stay on it"): `herdr agent prompt <agent> "<task>" --wait --until done --until idle --until blocked --timeout 540000`, with the shell tool's `timeout=560` (Hermes and vux-agent both cap it at 600 seconds). If that wait times out while the agent is still `working`, say it's still going and what it's doing, in one sentence from the latest output, then wait again with `herdr agent wait`.
 
 **Tell me when it's done** ("let me know when asterism 2 finishes"): mark it as yours (the `touch` line above), start the same background subagent for that agent, even one you didn't start, and tell the user you will.
 

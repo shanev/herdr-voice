@@ -55,46 +55,48 @@ class Frontmatter(unittest.TestCase):
         # Hermes' skill scan parses only the first 4000 characters (tools/skills_tool.py).
         self.assertLess(TEXT.index("\n---\n", 3), 4000)
 
-    def test_describes_itself_to_hark(self):
-        # Hark's voice skill catalog and app read metadata.hark (heyhark.app/voice-skills.json).
-        hark = frontmatter()["metadata"]["hark"]
-        self.assertIs(hark["voice"], True)
+    def test_describes_itself_to_vux(self):
+        # Vux reads metadata.vux, else metadata.hark; Hark-era apps, agents and hark-auth read only metadata.hark, so
+        # the section keeps that name.
+        self.assertEqual(list(frontmatter()["metadata"]), ["hark"])
+        vux = frontmatter()["metadata"]["hark"]
+        self.assertIs(vux["voice"], True)
         # The name the app shows for the skill, in place of its folder's.
-        self.assertEqual(hark["title"], "Herdr")
-        self.assertLessEqual(len(hark["summary"]), 120)
-        self.assertEqual(hark["requires"]["command"], "herdr")
+        self.assertEqual(vux["title"], "Herdr")
+        self.assertLessEqual(len(vux["summary"]), 120)
+        self.assertEqual(vux["requires"]["command"], "herdr")
         # Hand-offs need delegate_task, and the permission and merge choices need memory
-        # (heyhark docs/voice-extension.md, section 1). Hark marks the skill on an agent without them.
-        self.assertEqual(hark["requires"]["capabilities"], ["background_tasks", "memory"])
-        self.assertLessEqual(len(hark["phrases"]), 6)
-        self.assertTrue(all(hark["phrases"]))
+        # (vux-agent/docs/voice-extension.md, section 1). Vux marks the skill on an agent without them.
+        self.assertEqual(vux["requires"]["capabilities"], ["background_tasks", "memory"])
+        self.assertLessEqual(len(vux["phrases"]), 6)
+        self.assertTrue(all(vux["phrases"]))
         # Examples anyone could say: no one else's repo names (the app's own, "hark", once was).
-        self.assertFalse([p for p in hark["phrases"] if "hark" in p.lower()])
-        self.assertLessEqual(len(hark["routing"]), 300)
-        self.assertIn("herdr-voice", hark["routing"])
+        self.assertFalse([p for p in vux["phrases"] if "hark" in p.lower()])
+        self.assertLessEqual(len(vux["routing"]), 300)
+        self.assertIn("herdr-voice", vux["routing"])
 
 
-    def test_declares_its_workspaces_and_agents_to_hark(self):
-        # The voice extension's section 8: Hark's agent runs these, in this folder, without a shell, and shows a
+    def test_declares_its_workspaces_and_agents_to_vux(self):
+        # The voice extension's section 8: Vux's agent runs these, in this folder, without a shell, and shows a
         # page per workspace with its agents. Each command must name a script that's here.
-        hark = frontmatter()["metadata"]["hark"]
-        for command, word in [(hark["contexts"]["list"], "contexts"), (hark["contexts"]["create"], "create"),
-                              (hark["items"]["list"], "items")]:
-            self.assertEqual(command, ["python3", "scripts/hark_state.py", word])
+        vux = frontmatter()["metadata"]["hark"]
+        for command, word in [(vux["contexts"]["list"], "contexts"), (vux["contexts"]["create"], "create"),
+                              (vux["items"]["list"], "items")]:
+            self.assertEqual(command, ["python3", "scripts/vux_state.py", word])
             self.assertTrue((SKILL.parent / command[1]).exists())
-        scope = hark["contexts"]["scope"]
+        scope = vux["contexts"]["scope"]
         self.assertLessEqual(len(scope), 300)
         for placeholder in ("{name}", "{location}", "{id}"):
             self.assertIn(placeholder, scope)
         self.assertNotIn("{", scope.replace("{name}", "").replace("{location}", "").replace("{id}", ""))
-        self.assertTrue(set(hark["items"]["push"]) <= {"working", "waiting", "done", "failed", "idle"})
-        self.assertEqual(hark["items"]["push"], ["waiting", "done"])
+        self.assertTrue(set(vux["items"]["push"]) <= {"working", "waiting", "done", "failed", "idle"})
+        self.assertEqual(vux["items"]["push"], ["waiting", "done"])
 
     def test_takes_the_workspace_from_the_run(self):
-        # Hark scopes a workspace's page with the scope sentence; the skill must use it instead of guessing.
-        self.assertIn("## Hark", TEXT)
-        section = TEXT.split("## Hark")[1].split("\n## ")[0]
-        for needle in ("instructions", "never from memory", "--machine <machine>", "Never `ssh`", "[Card answer]", "[Card result]", "scripts/hark_state.py realert"):
+        # Vux scopes a workspace's page with the scope sentence; the skill must use it instead of guessing.
+        self.assertIn("## Vux", TEXT)
+        section = TEXT.split("## Vux")[1].split("\n## ")[0]
+        for needle in ("instructions", "never from memory", "--machine <machine>", "Never `ssh`", "[Card answer]", "[Card result]", "scripts/vux_state.py realert"):
             self.assertIn(needle, section)
 
 
@@ -208,7 +210,7 @@ class Recipes(unittest.TestCase):
         self.assertEqual(TEXT.count("herdr agent focus"), 1)
 
     def test_waits_fit_the_shell_limits(self):
-        # Hermes and hark-agent both cap a shell command at 600 s; hark-agent stops one after 60 s
+        # Hermes and vux-agent both cap a shell command at 600 s; vux-agent stops one after 60 s
         # unless the model passes a longer timeout, so a herdr wait of 60 s or more names one.
         for line in TEXT.splitlines():
             for ms in re.findall(r"--timeout (\d+)", line):
@@ -217,7 +219,7 @@ class Recipes(unittest.TestCase):
                     self.assertRegex(line + TEXT.split(line, 1)[1][:400], r"shell tool's `timeout=\d+`")
 
     def test_not_tied_to_hermes(self):
-        # herdr-voice also runs in hark-agent, Hark's own agent.
+        # herdr-voice also runs in vux-agent, Vux's own agent.
         self.assertNotIn("You run as the Hermes gateway", TEXT)
         self.assertNotIn("terminal tool", TEXT)
 

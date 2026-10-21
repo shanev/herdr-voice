@@ -85,7 +85,7 @@ class Resolved(Hook):
             self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1"})], status)
 
     def test_only_a_blocked_pane_has_a_question(self):
-        # Not a resolved question: the change is only for Hark's open stream (an alert, if any, comes once settled).
+        # Not a resolved question: the change is only for Vux's open stream (an alert, if any, comes once settled).
         for status in ("done", "blocked"):
             self.assertEqual(self.run_hook([self.status("w1:p1", status)], [("w1:p1", "working")]),
                              [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False})], status)
@@ -98,10 +98,10 @@ class Resolved(Hook):
             sent = self.run_hook([data, data], [("w1:p1", "blocked")])
             self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1"})], data["type"])
         closed = {"type": "pane_closed", "pane_id": "w1:p1", "workspace_id": "w1"}
-        # An agent's pane that wasn't asking: gone from Hark's list, nothing to withdraw or push.
+        # An agent's pane that wasn't asking: gone from Vux's list, nothing to withdraw or push.
         self.assertEqual(self.run_hook([closed, closed], [("w1:p1", "done")]),
                          [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False})])
-        # A pane that never had an agent isn't on Hark's list.
+        # A pane that never had an agent isn't on Vux's list.
         self.assertEqual(self.run_hook([closed]), [])
 
     def test_a_gateway_without_skill_state_is_skipped(self):
@@ -116,7 +116,7 @@ class Resolved(Hook):
 
 
 class Reports(Hook):
-    """Hark doesn't poll: every change it shows is reported at once, for its open stream only (`push: false`)."""
+    """Vux doesn't poll: every change it shows is reported at once, for its open stream only (`push: false`)."""
 
     def test_every_status_change_is_reported_at_once(self):
         sent = self.run_hook([self.status("w1:p1", "idle"), self.status("w1:p1", "working"), self.status("w1:p1", "working"),
@@ -172,7 +172,7 @@ class Alerting(unittest.TestCase):
             for n, f in original.items():
                 setattr(desk_alert, n, f)
             os.environ.pop("HERDR_PLUGIN_EVENT_JSON", None)
-        # Each status for Hark's open stream at once, then the settled alert, which may push.
+        # Each status for Vux's open stream at once, then the settled alert, which may push.
         self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False})] * 2
                          + [(CHANGED, {"context": "w1", "item": "w1:p1"})])
 
@@ -184,7 +184,7 @@ class HandOffs(unittest.TestCase):
             (folder / "w1:p1").touch()
             now = time.time()
             self.assertTrue(desk_alert.take_hand_off(["w1:p1", None], now, folder))
-            # The finish stays Hermes' to tell: hark_state.py gives it no result card.
+            # The finish stays Hermes' to tell: vux_state.py gives it no result card.
             self.assertTrue((folder / "w1:p1.finished").exists())
             # The agent's next task, typed at the desk later, is alerted, and its result is the user's to hear.
             self.assertFalse(desk_alert.take_hand_off(["w1:p1", None], now + desk_alert.SAME_TASK_SECONDS + 1, folder))
@@ -206,17 +206,17 @@ class HandOffs(unittest.TestCase):
             self.assertFalse((folder / "w1:p1.finished").exists())
 
     def test_the_skills_state_script_reads_the_same_marks(self):
-        spec = importlib.util.spec_from_file_location("hark_state", SKILL.parent / "scripts" / "hark_state.py")
-        hark_state = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(hark_state)
-        self.assertEqual(hark_state.HANDED_OFF, desk_alert.HANDED_OFF)
+        spec = importlib.util.spec_from_file_location("vux_state", SKILL.parent / "scripts" / "vux_state.py")
+        vux_state = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vux_state)
+        self.assertEqual(vux_state.HANDED_OFF, desk_alert.HANDED_OFF)
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
             (folder / "apple-models").touch()
             desk_alert.take_hand_off(["w1:p1", "apple-models"], time.time(), folder)
-            hark_state.HANDED_OFF = folder
-            self.assertTrue(hark_state.handed_off({"pane_id": "w1:p1", "name": "apple-models"}, time.time()))
-            self.assertFalse(hark_state.handed_off({"pane_id": "w1:p2"}, time.time()))
+            vux_state.HANDED_OFF = folder
+            self.assertTrue(vux_state.handed_off({"pane_id": "w1:p1", "name": "apple-models"}, time.time()))
+            self.assertFalse(vux_state.handed_off({"pane_id": "w1:p2"}, time.time()))
 
     def test_marked_by_name(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -257,29 +257,29 @@ class Settings(unittest.TestCase):
             folder = Path(folder)
             hermes = folder / "hermes.env"
             hermes.write_text('API_SERVER_KEY="secret"\nAPI_SERVER_PORT=9000\n', encoding="utf-8")
-            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-hark-agent"),
+            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-vux-agent"),
                              {"agents": [{"url": "http://127.0.0.1:9000", "key": "secret"}], "away_after_minutes": 5,
                               "settle_seconds": 20})
             (folder / ".env").write_text("# mine\nexport AWAY_AFTER_MINUTES=0\nSETTLE_SECONDS=2\nHERMES_API_URL=https://mac.example/\n",
                                          encoding="utf-8")
             # An agent of your own is told too, first, with Hermes' key unless you give one.
-            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-hark-agent"),
+            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-vux-agent"),
                              {"agents": [{"url": "https://mac.example", "key": "secret"}, {"url": "http://127.0.0.1:9000", "key": "secret"}],
                               "away_after_minutes": 0, "settle_seconds": 2})
             (folder / ".env").write_text("HERMES_API_URL=http://127.0.0.1:9000\nHERMES_API_KEY=other\n", encoding="utf-8")
-            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-hark-agent")["agents"],
+            self.assertEqual(desk_alert.settings(folder, hermes, folder / "no-vux-agent")["agents"],
                              [{"url": "http://127.0.0.1:9000", "key": "other"}])
 
     def test_every_agent_on_the_machine(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
-            agent = folder / ".hark-agent"
+            agent = folder / ".vux-agent"
             agent.mkdir()
             (agent / "agent-key").write_text("agent-secret\n", encoding="utf-8")
             (agent / "env").write_text("PORT=8650\nWORKSPACE='/Users/me'\n", encoding="utf-8")
             self.assertEqual(desk_alert.settings(folder, folder / "no-hermes.env", agent)["agents"],
                              [{"url": "http://127.0.0.1:8650", "key": "agent-secret"}])
-            # Hermes and Hark's agent on one Mac: both are told, Hermes first.
+            # Hermes and vux-agent on one Mac: both are told, Hermes first.
             hermes = folder / "hermes.env"
             hermes.write_text("API_SERVER_KEY=secret\n", encoding="utf-8")
             self.assertEqual(desk_alert.settings(folder, hermes, agent)["agents"],
@@ -305,11 +305,11 @@ class Settings(unittest.TestCase):
 
 
 class EveryAgent(unittest.TestCase):
-    """Each agent on the machine serves Hark its own stream, so each hears of every change, at once: one that's slow or
+    """Each agent on the machine serves Vux its own stream, so each hears of every change, at once: one that's slow or
     down holds up none of the others. Each may push it: an agent pushes only to the phones paired with it, and which
     agent that is (the computer the phone pairs) isn't this plugin's to know."""
 
-    AGENTS = {"agents": [{"url": "http://hermes", "key": "h"}, {"url": "http://hark-agent", "key": "a"}]}
+    AGENTS = {"agents": [{"url": "http://hermes", "key": "h"}, {"url": "http://vux-agent", "key": "a"}]}
 
     def run_changed(self, *args, fail=(), slow=(), started=None):
         sent = []
@@ -332,26 +332,26 @@ class EveryAgent(unittest.TestCase):
     def test_a_stream_change_goes_to_every_agent(self):
         self.assertEqual(self.run_changed("w1", "w1:p1", False), [
             ("http://hermes/v1/skills/herdr-voice/changed", "h", {"context": "w1", "item": "w1:p1", "push": False}),
-            ("http://hark-agent/v1/skills/herdr-voice/changed", "a", {"context": "w1", "item": "w1:p1", "push": False})])
+            ("http://vux-agent/v1/skills/herdr-voice/changed", "a", {"context": "w1", "item": "w1:p1", "push": False})])
         self.assertEqual([body for _, _, body in self.run_changed(None, None, False)], [{"push": False}, {"push": False}])
 
     def test_every_agent_may_push(self):
-        # Hermes left installed after the phone moved to Hark's agent must not be the only one allowed to push.
+        # Hermes left installed after the phone moved to vux-agent must not be the only one allowed to push.
         self.assertEqual(sorted((url, body) for url, _, body in self.run_changed("w1", "w1:p1")), [
-            ("http://hark-agent/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1"}),
-            ("http://hermes/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1"})])
+            ("http://hermes/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1"}),
+            ("http://vux-agent/v1/skills/herdr-voice/changed", {"context": "w1", "item": "w1:p1"})])
 
     def test_one_agent_down_doesnt_stop_the_others(self):
         sent = self.run_changed("w1", "w1:p1", False, fail=("http://hermes",))
-        self.assertEqual(sorted(url for url, _, _ in sent), ["http://hark-agent/v1/skills/herdr-voice/changed",
-                                                             "http://hermes/v1/skills/herdr-voice/changed"])
+        self.assertEqual(sorted(url for url, _, _ in sent), ["http://hermes/v1/skills/herdr-voice/changed",
+                                                             "http://vux-agent/v1/skills/herdr-voice/changed"])
 
     def test_a_slow_agent_doesnt_hold_up_the_others(self):
         started, begun = {}, time.monotonic()
         sent = self.run_changed("w1", "w1:p1", False, slow=("http://hermes",), started=started)
-        self.assertLess(started["http://hark-agent/v1/skills/herdr-voice/changed"] - begun, 0.3)
-        # Hark's agent was told while Hermes was still answering; the hook still waits for both before it exits.
-        self.assertEqual([url for url, _, _ in sent], ["http://hark-agent/v1/skills/herdr-voice/changed",
+        self.assertLess(started["http://vux-agent/v1/skills/herdr-voice/changed"] - begun, 0.3)
+        # vux-agent was told while Hermes was still answering; the hook still waits for both before it exits.
+        self.assertEqual([url for url, _, _ in sent], ["http://vux-agent/v1/skills/herdr-voice/changed",
                                                        "http://hermes/v1/skills/herdr-voice/changed"])
 
 
