@@ -59,6 +59,8 @@ class Frontmatter(unittest.TestCase):
         # Hark's voice skill catalog and app read metadata.hark (heyhark.app/voice-skills.json).
         hark = frontmatter()["metadata"]["hark"]
         self.assertIs(hark["voice"], True)
+        # The name the app shows for the skill, in place of its folder's.
+        self.assertEqual(hark["title"], "Herdr")
         self.assertLessEqual(len(hark["summary"]), 120)
         self.assertEqual(hark["requires"]["command"], "herdr")
         # Hand-offs need delegate_task, and the permission and merge choices need memory
@@ -66,6 +68,8 @@ class Frontmatter(unittest.TestCase):
         self.assertEqual(hark["requires"]["capabilities"], ["background_tasks", "memory"])
         self.assertLessEqual(len(hark["phrases"]), 6)
         self.assertTrue(all(hark["phrases"]))
+        # Examples anyone could say: no one else's repo names (the app's own, "hark", once was).
+        self.assertFalse([p for p in hark["phrases"] if "hark" in p.lower()])
         self.assertLessEqual(len(hark["routing"]), 300)
         self.assertIn("herdr-voice", hark["routing"])
 

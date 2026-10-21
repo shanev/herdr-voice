@@ -4,6 +4,7 @@ description: "Claude Code, Codex, omp, any coding agent: Herdr, not tmux"
 metadata:
   hark:
     voice: true
+    title: Herdr
     summary: "Start, check and steer Claude Code, Codex and other coding agents in Herdr."
     requires:
       command: herdr
@@ -11,9 +12,9 @@ metadata:
         - background_tasks
         - memory
     phrases:
-      - "new Claude session for hark"
+      - "new Claude session for website"
       - "what's waiting on me?"
-      - "tell the hark Claude to fix the failing test"
+      - "tell the api Claude to fix the failing test"
       - "where did we do the swipe fix?"
       - "stop the codex agent"
     contexts:
@@ -83,7 +84,7 @@ Hark shows a page per Herdr workspace on this machine, with its agents, from `sc
 
 Every command prints JSON; read ids and states from it. For anything not covered here, print a command group's usage by running it without a subcommand (`herdr agent`, `herdr workspace`, `herdr tab`, `herdr pane`). Never run bare `herdr`: it opens the interactive UI.
 
-**What's running:** `herdr agent list`. When the user says "sessions" they mean these coding agents, not Herdr's server sessions (`herdr session list` is almost never what they want). Speak of each agent by its `name` when it has one ("apple-models in hark"); otherwise by its pane's label, if the pane has one ("the reviewer in hark"); otherwise the way Herdr's sidebar shows it: workspace label and tab label ("asterism 2", labels from `herdr workspace list` and `herdr tab list --workspace <id>`). `herdr pane list` gives each pane's `label`, set with `herdr pane rename` by the user or a plugin such as Auto Title. A pane without one shows its terminal title there, so a `label` counts only when it differs from the pane's `terminal_title_stripped`. Never say a `pane_id` to the user. Then give its kind and state: idle or done means waiting for input, working, or blocked. To match the user's words back to a `pane_id`, try the names first ("the apple models agent" is `apple-models`, spoken with spaces for dashes), then pane labels ("the reviewer"), and fall back to workspace and tab ("the asterism 2 agent", "the Claude in hark") only for agents with neither.
+**What's running:** `herdr agent list`. When the user says "sessions" they mean these coding agents, not Herdr's server sessions (`herdr session list` is almost never what they want). Speak of each agent by its `name` when it has one ("apple-models in hark"); otherwise by its pane's label, if the pane has one ("the reviewer in hark"); otherwise by what it's working on, its `terminal_title_stripped` without the agent's own decoration (omp's `π >` and icons, Grok's `- grok`, Codex's `| <folder>`), which is how the voice app shows it ("the Tesla Roadster simulation Claude in asterism"); otherwise the way Herdr's sidebar shows it: workspace label and tab label ("asterism 2", labels from `herdr workspace list` and `herdr tab list --workspace <id>`). A title that only names the agent or its folder ("Claude Code") isn't a task. The workspace labelled `~` is the home folder's: call it "Home", as the voice app does. `herdr pane list` gives each pane's `label`, set with `herdr pane rename` by the user or a plugin such as Auto Title. A pane without one shows its terminal title there, so a `label` counts only when it differs from the pane's `terminal_title_stripped`. Never say a `pane_id` to the user. Then give its kind and state: idle or done means waiting for input, working, or blocked. To match the user's words back to a `pane_id`, try the names first ("the apple models agent" is `apple-models`, spoken with spaces for dashes), then pane labels ("the reviewer"), then what the agents are working on ("the Tesla Roadster one"; the voice app shows the start of it, about 40 characters, so match the start), and fall back to workspace and tab ("the asterism 2 agent", "the Claude in hark") only for agents with none of these.
 
 **What's waiting on me:** sweep every agent in `herdr agent list` and sort it into one of three groups:
 
