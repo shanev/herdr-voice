@@ -6,6 +6,7 @@ Usage: vux_state.py contexts
        vux_state.py create <repo-or-name> [machine]
        vux_state.py items [workspace]
        vux_state.py realert <pane>
+       vux_state.py mark <agent>
 
 contexts: this machine's herdr workspaces, as {"contexts": [{"id", "name", "location"}]}, the location its host name;
 the home folder's workspace (labelled "~") is "Home".
@@ -23,7 +24,13 @@ a done agent whose finish no one has told the user yet, a result card, with the 
 and Codex, on this machine). An agent herdr-voice handed off (its mark in ~/.cache/herdr-voice/handed-off) gets no
 result card: Hermes reports that one in the conversation.
 
-realert: has the desk-alerts plugin alert again for a pane whose dialog moved on to another question.
+realert: has the desk-alerts plugin alert again for a pane whose dialog moved on to another question, and clears the
+pane's hand-off mark (below), so the plugin reports the pane from then on.
+
+mark: marks the agent's task (by pane id or name) as handed off: the agent running this skill reports it, so the
+desk-alerts plugin doesn't alert for it and items give it no result card. The mark is a file named for the agent in
+~/.cache/herdr-voice/handed-off, which the plugin reads. These are the skill's only bookkeeping writes, here so the agent
+never runs `touch` or `rm` on them itself (an agent's approval policy may stop a turn to ask about an `rm`).
 
 Stdlib only.
 """
@@ -218,10 +225,23 @@ def screen_text(screen):
     return "\n".join(line for line in lines if line)[-6000:]
 
 
+def marks(name):
+    """The hand-off mark for an agent's pane id or name, and the one the desk-alerts plugin leaves once that task
+    finished (`<name>.finished`), as the plugin names them."""
+    mark = HANDED_OFF / name.replace("/", "_")
+    return mark, mark.with_name(mark.name + ".finished")
+
+
+def mark(agent):
+    """Marks the agent's task as handed off (a fresh mark: it counts for HAND_OFF_TTL from now)."""
+    HANDED_OFF.mkdir(parents=True, exist_ok=True)
+    marks(agent)[0].touch()
+
+
 def handed_off(agent, now):
     """herdr-voice handed this agent's task off, so Hermes tells its result itself."""
     for name in filter(None, (agent.get("pane_id"), agent.get("name"))):
-        for marker in (HANDED_OFF / name.replace("/", "_"), HANDED_OFF / (name.replace("/", "_") + ".finished")):
+        for marker in marks(name):
             try:
                 if now - marker.stat().st_mtime < HAND_OFF_TTL:
                     return True
@@ -303,6 +323,14 @@ def items(context=None):
 
 
 def realert(pane):
+    # The pane is the plugin's to report again: its next finish or question is an alert, not a hand-off. Its agent may
+    # have been marked by name too.
+    try:
+        name = (herdr_json("agent", "get", pane).get("agent") or {}).get("name")
+    except (HerdrError, ValueError, AttributeError):
+        name = None
+    for marker in [m for each in filter(None, (pane, name)) for m in marks(each)]:
+        marker.unlink(missing_ok=True)
     plugins = herdr_json("plugin", "list", "--json")["plugins"]
     root = next((p.get("plugin_root") for p in plugins if p.get("plugin_id") == "herdr-voice.desk-alerts"), None)
     if not root:
@@ -320,10 +348,12 @@ def main(argv):
             print(json.dumps(items(*argv[2:])))
         elif len(argv) == 3 and argv[1] == "realert":
             realert(argv[2])
+        elif len(argv) == 3 and argv[1] == "mark":
+            mark(argv[2])
         else:
             print(__doc__.strip(), file=sys.stderr)
             return 2
-    except (HerdrError, ValueError, KeyError, TypeError) as error:
+    except (HerdrError, ValueError, KeyError, TypeError, OSError) as error:
         print(f"vux_state: {error}", file=sys.stderr)
         return 1
     return 0

@@ -77,7 +77,7 @@ Vux, the voice app, shows a page per Herdr workspace on this machine, with its a
 
 - **The workspace from the instructions** is the one the user means. New sessions go in it as new tabs (step 3 of **Start a session**, with its id; skip `repo_workspace.py`), and "the Claude", "it" or "the agent" are agents in it, unless the user names another repo or workspace. The Vux context is the workspace id (`w5M`), on this machine. When the user asks for work on another machine by name, that's one of Herdr's saved machines (`herdr machine list`): put `--machine <machine>` right after `herdr` in every herdr command for it (`herdr --machine vega@vega agent list`). Never `ssh` to the machine: Herdr reaches it. Its repo paths are that machine's.
 - **Live state:** what the agents in the workspace are doing changes from minute to minute: read it with `herdr agent list` (and the screen or last reply) every time, never from memory or earlier in the conversation.
-- **[Card answer]:** a run that starts with `[Card answer]` is the user answering an agent's question from its card in Vux; it names the agent's pane id as its item. Read the screen (`herdr agent read <pane_id> --source visible`). If that question isn't showing anymore, it was answered at the desk: say so in a few words and do nothing else. Otherwise mark the agent as yours (the `touch` line in **Send a task**), answer it as **Answer a question** says, and read the screen again. If the agent asks another question now, run `rm -f ~/.cache/herdr-voice/handed-off/<pane_id>` and `python3 ${HERMES_SKILL_DIR}/scripts/vux_state.py realert <pane_id>` (`scripts/vux_state.py` in this skill's folder), and say only that you answered it. Otherwise hand off the wait as in **Send a task**, and say in a sentence that it's running.
+- **[Card answer]:** a run that starts with `[Card answer]` is the user answering an agent's question from its card in Vux; it names the agent's pane id as its item. Read the screen (`herdr agent read <pane_id> --source visible`). If that question isn't showing anymore, it was answered at the desk: say so in a few words and do nothing else. Otherwise mark the agent as yours (the `mark` line in **Send a task**), answer it as **Answer a question** says, and read the screen again. If the agent asks another question now, run `python3 ${HERMES_SKILL_DIR}/scripts/vux_state.py realert <pane_id>` (`scripts/vux_state.py` in this skill's folder; it also clears your mark, so the desk alerts report that agent again), and say only that you answered it. Otherwise hand off the wait as in **Send a task**, and say in a sentence that it's running.
 - **[Card result]:** a run that starts with `[Card result]` asks for an agent's result: read it as in **Read the result** and report it as in **Reporting back by voice**.
 
 ## Recipes
@@ -138,10 +138,10 @@ If `agent start` fails with `agent_not_ready` (blocked during startup), read the
 
 **Send a task** and hand off the waiting, so the user can keep talking while the agent works:
 
-1. Send it and check it started. The first line marks the task as yours to report, so the desk-alerts plugin (if installed) doesn't announce it too:
+1. Send it and check it started. The first line, the `mark` line, marks the task as yours to report, so the desk-alerts plugin (if installed) doesn't announce it too:
 
    ```bash
-   mkdir -p ~/.cache/herdr-voice/handed-off && touch ~/.cache/herdr-voice/handed-off/<agent>
+   python3 ${HERMES_SKILL_DIR}/scripts/vux_state.py mark <agent>
    herdr agent prompt <agent> "<task>" --wait --until working --until blocked --until done --until idle --timeout 30000
    ```
 
@@ -157,7 +157,7 @@ If `agent start` fails with `agent_not_ready` (blocked during startup), read the
 
 Wait in your own turn instead only when the user asks you to ("do it and wait", "stay on it"): `herdr agent prompt <agent> "<task>" --wait --until done --until idle --until blocked --timeout 540000`, with the shell tool's `timeout=560` (Hermes and vux-agent both cap it at 600 seconds). If that wait times out while the agent is still `working`, say it's still going and what it's doing, in one sentence from the latest output, then wait again with `herdr agent wait`.
 
-**Tell me when it's done** ("let me know when asterism 2 finishes"): mark it as yours (the `touch` line above), start the same background subagent for that agent, even one you didn't start, and tell the user you will.
+**Tell me when it's done** ("let me know when asterism 2 finishes"): mark it as yours (the `mark` line above), start the same background subagent for that agent, even one you didn't start, and tell the user you will.
 
 **Several agents at once:** when one request starts or prompts several agents, do step 1 of **Send a task** for each, then call `delegate_task` once per agent with the goal above, plus once more for the whole batch with this goal: wait for each of `<agent>`, `<agent>`, … in turn as above, and return all their final states and replies together. Say the hand-off sentence once, for the whole batch. Results come back as separate messages, one per subagent, and the per-agent ones race the batch one. On each arrival, check whether you now have a result for every agent in the batch: if not, end your turn without saying anything; if so, report them all once, in one reply. Results that arrive after you've reported the set are duplicates: end your turn without speaking.
 
@@ -183,7 +183,7 @@ Tell the user you'll merge it when the checks pass and let them know. When the r
 
 **Suggested prompts:** Claude Code shows a suggested next prompt, dimmed, in its empty input box after a reply. A screen read shows it as ordinary text after `❯`. It isn't queued and isn't the agent's question: never report it, and never send `Enter` for it.
 
-**Blocked:** read the screen and tell the user the question in one sentence. Answer it only once they reply, as in **Answer a question**. For a permission prompt, pick the plain yes or no; "always allow" or a mode switch only when the user asks for it. Before answering, mark the agent as yours (the `touch` line above), so its finish isn't announced again as a desk alert, then wait for it and report as for a task.
+**Blocked:** read the screen and tell the user the question in one sentence. Answer it only once they reply, as in **Answer a question**. For a permission prompt, pick the plain yes or no; "always allow" or a mode switch only when the user asks for it. Before answering, mark the agent as yours (the `mark` line above), so its finish isn't announced again as a desk alert, then wait for it and report as for a task.
 
 **Answer a question:** every agent draws its question dialog differently, so read the screen (`herdr agent read <agent> --source visible`) and find the user's option in the dialog at the bottom.
 

@@ -209,6 +209,35 @@ class VuxState(unittest.TestCase):
         self.run_state("realert", "w5M:p2", check=False)
         self.assertEqual((plugin / "ran").read_text(), "realert w5M:p2")
 
+    def test_realert_hands_the_pane_back_to_the_plugin(self):
+        # Answered from its card, the agent was marked as the agent's to report; it asked another question, so the
+        # plugin alerts for it again, and its finish is the plugin's to report: realert clears its marks, by pane id
+        # and by its agent's name, and leaves other agents' alone. The skill never runs `rm` for this.
+        marks = self.home / ".cache" / "herdr-voice" / "handed-off"
+        for name in ("w5M:p2", "w5M:p2.finished", "reviewer-bot", "w5M:p1", "apple-models"):
+            (marks / name).touch()
+        self.answers["|agent get w5M:p2"] = result({"agent": {**AGENTS[1], "name": "reviewer-bot"}})
+        self.answers["|plugin list --json"] = result({"plugins": [{"plugin_id": "herdr-voice.desk-alerts",
+                                                                   "plugin_root": str(self.folder / "none")}]})
+        self.run_state("realert", "w5M:p2", check=False)
+        self.assertEqual(sorted(p.name for p in marks.iterdir()), ["apple-models", "handed.finished", "w5M:p1"])
+        # Without the plugin, the marks are cleared all the same, and it says why no alert comes.
+        (marks / "w5M:p2").touch()
+        self.answers["|plugin list --json"] = result({"plugins": []})
+        done = self.run_state("realert", "w5M:p2", check=False)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("desk-alerts plugin isn't installed", done.stderr)
+        self.assertFalse((marks / "w5M:p2").exists())
+
+    def test_a_marked_agent_gets_no_result_card(self):
+        # `mark` is how the skill hands a task off: the agent reports that result in its conversation, so the row
+        # doesn't offer it too.
+        done = self.run_state("mark", "w5M:p3", check=False)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.home / ".cache" / "herdr-voice" / "handed-off" / "w5M:p3").exists())
+        item = next(i for i in self.run_state("items", "w5M")["items"] if i["id"] == "w5M:p3")
+        self.assertNotIn("card", item)
+
     def test_names_tell_agents_apart_and_a_cut_title_is_no_label(self):
         # Two omps in one tab with no task yet, two Claudes on the same task, and a pane whose label is only its
         # terminal title cut short (herdr does that at 50).

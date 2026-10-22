@@ -38,7 +38,8 @@ from pathlib import Path
 
 # The skill whose items these are (its SKILL.md declares them for Vux).
 SKILL = "herdr-voice"
-# herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off.
+# herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off (its
+# `scripts/vux_state.py mark`), and clears the pane's when it has the plugin alert again (`realert`).
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
 # A finish this soon after a handed-off one is the same task (Claude ended a reply, worked on, ended again).
@@ -227,11 +228,6 @@ def settings(config_dir, hermes_env, vux_agent=None):
         "away_after_minutes": number("AWAY_AFTER_MINUTES", DEFAULT_AWAY_MINUTES),
         "settle_seconds": number("SETTLE_SECONDS", DEFAULT_SETTLE_SECONDS),
     }
-
-
-def hand_off_command(pane):
-    """What marks the agent as Hermes' to report (herdr-voice's SKILL.md runs the same)."""
-    return f"mkdir -p ~/.cache/herdr-voice/handed-off && touch ~/.cache/herdr-voice/handed-off/{pane}"
 
 
 def herdr(*args):

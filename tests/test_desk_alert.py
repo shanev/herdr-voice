@@ -1,6 +1,8 @@
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import time
 import tomllib
@@ -234,7 +236,6 @@ class HandOffs(unittest.TestCase):
             self.assertFalse(marker.exists())
 
     def test_the_skill_marks_the_same_folder(self):
-        self.assertIn("~/.cache/herdr-voice/handed-off/", SKILL.read_text(encoding="utf-8"))
         self.assertEqual(desk_alert.HANDED_OFF, Path.home() / ".cache" / "herdr-voice" / "handed-off")
 
 
@@ -412,9 +413,29 @@ class Realert(unittest.TestCase):
 
 
 class Marks(unittest.TestCase):
+    def mark(self, home, agent):
+        subprocess.run([sys.executable, "scripts/vux_state.py", "mark", agent], cwd=SKILL.parent, check=True,
+                       env={"HOME": str(home), "PATH": os.environ["PATH"]}, capture_output=True, timeout=30)
+
     def test_marks_like_the_skill(self):
-        skill = SKILL.read_text(encoding="utf-8")
-        self.assertIn(desk_alert.hand_off_command("<agent>"), skill)
+        # The skill marks an agent with `vux_state.py mark`, and this plugin finds the mark where it looks.
+        with tempfile.TemporaryDirectory() as home:
+            folder = Path(home) / ".cache" / "herdr-voice" / "handed-off"
+            self.mark(home, "w1:p1")
+            self.mark(home, "apple-models")
+            self.assertTrue(desk_alert.take_hand_off(["w1:p1", None], time.time(), folder))
+            self.assertTrue(desk_alert.take_hand_off(["w2:p1", "apple-models"], time.time(), folder))
+            self.assertFalse(desk_alert.take_hand_off(["w3:p1", "other"], time.time(), folder))
+
+    def test_marking_again_is_a_fresh_mark(self):
+        # A mark counts for 12 hours from when the task was handed off: the next task's mark starts the clock again.
+        with tempfile.TemporaryDirectory() as home:
+            folder = Path(home) / ".cache" / "herdr-voice" / "handed-off"
+            self.mark(home, "w1:p1")
+            old = time.time() - desk_alert.HAND_OFF_TTL - 60
+            os.utime(folder / "w1:p1", (old, old))
+            self.mark(home, "w1:p1")
+            self.assertTrue(desk_alert.take_hand_off(["w1:p1"], time.time(), folder))
 
 
 if __name__ == "__main__":

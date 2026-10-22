@@ -139,10 +139,19 @@ class Recipes(unittest.TestCase):
 
     def test_marks_hand_offs_for_desk_alerts(self):
         # plugins/desk-alerts skips agents with this mark: Hermes reports those itself.
-        self.assertIn("touch ~/.cache/herdr-voice/handed-off/<agent>", TEXT)
+        self.assertIn("python3 ${HERMES_SKILL_DIR}/scripts/vux_state.py mark <agent>", TEXT)
         # Answering a stuck agent makes its finish Hermes' to report too.
         blocked = next(line for line in TEXT.splitlines() if line.startswith("**Blocked:**"))
-        self.assertIn("the `touch` line above", blocked)
+        self.assertIn("the `mark` line above", blocked)
+        # A question after the answer goes back to the plugin, which clears the mark: one script call.
+        card = next(line for line in TEXT.splitlines() if line.startswith("- **[Card answer]:**"))
+        self.assertIn("scripts/vux_state.py realert <pane_id>", card)
+
+    def test_bookkeeping_is_never_a_file_command(self):
+        # vux-agent asks the user before any `rm`, and a turn nobody answers on the phone hangs (it did, live): the
+        # skill's own state is written through its script, never by the agent with rm, mv, touch or mkdir.
+        self.assertNotRegex(TEXT, r"\b(rm|mv|touch|mkdir|unlink|cp)\b[^`\n]*~/\.cache/herdr-voice")
+        self.assertNotRegex(TEXT, r"`[^`]*\brm -")
 
     def test_triage_sweeps_every_agent(self):
         # "What's waiting on me" reads each idle agent's reply, and leaves live prompts to Blocked.
