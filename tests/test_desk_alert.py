@@ -619,14 +619,14 @@ class Naming(Hook):
                 state["agents"][0]["terminal_title_stripped"] = "✳ Newly added models tweet"
                 (FAKE_DIR / "state.json").write_text(json.dumps(state))
 
-        original = desk_alert.post, desk_alert.time.sleep
+        original = desk_alert.post
         try:
             desk_alert.post = lambda url, key, body, timeout: sent.append((url, body))
-            desk_alert.time.sleep = nap
             with tempfile.TemporaryDirectory() as folder:
-                desk_alert.name_when_titled(Path(folder), {"agents": [{"key": "k", "url": "http://hermes"}]}, "w1:p1")
+                desk_alert.name_when_titled(Path(folder), {"agents": [{"key": "k", "url": "http://hermes"}]}, "w1:p1",
+                                            sleep=nap)
         finally:
-            desk_alert.post, desk_alert.time.sleep = original
+            desk_alert.post = original
         # Looked twice: untitled, then titled and named; then it's done.
         self.assertEqual(naps, [desk_alert.NAME_EVERY_SECONDS] * 2)
         self.assertEqual(herdr_names(), {"w1:p1": "newly-added-models-tweet"})

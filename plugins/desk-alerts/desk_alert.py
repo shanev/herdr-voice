@@ -352,13 +352,13 @@ class _lock:
         self.handle.close()
 
 
-def name_when_titled(state, config, pane):
+def name_when_titled(state, config, pane, sleep=time.sleep):
     """For an unnamed agent that started working before its title said what on: looks again every
     NAME_EVERY_SECONDS, for up to NAME_WAIT_SECONDS, and names it once the title shows (or stops when it's gone or
     named). Runs detached from the hook. Vux hears of each agent named."""
     deadline = time.monotonic() + NAME_WAIT_SECONDS
     while time.monotonic() < deadline:
-        time.sleep(NAME_EVERY_SECONDS)
+        sleep(NAME_EVERY_SECONDS)
         named, untitled = name_agents(state)
         report_named(config, named)
         if pane not in untitled:
