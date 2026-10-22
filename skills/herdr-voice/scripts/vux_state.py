@@ -17,12 +17,24 @@ create: a workspace for a repo (found as ~/<repo>, ~/github.com/*/<repo> or ~/*/
 name, else one labelled with the name; on the given machine if it isn't this one (its id is then
 `<machine>/<workspace id>`). Prints {"context": {...}}.
 
-items: the agents in a workspace, or in every workspace each with its "context", as {"items": [...]}: herdr's status
-as working, waiting (blocked on a question), done, idle; named as `item_name` says, often for what it's working on, with
-its kind as the detail line; for a blocked agent, a question card with its screen (Vux reads the question from it); for
-a done agent whose finish no one has told the user yet, a result card, with the start of its last reply (Claude Code
-and Codex, on this machine). An agent herdr-voice handed off (its mark in ~/.cache/herdr-voice/handed-off) gets no
-result card: Hermes reports that one in the conversation.
+items: the agents in a workspace, or in every workspace each with its "context", as {"items": [...]}, in the item
+format version 2 that SKILL.md declares (metadata.hark.items.version). Every item has all of these, each with one
+meaning:
+  id     the agent's herdr pane id.
+  name   its herdr agent name: the handle the user, the skill and Vux use, unique among herdr's live agents and
+         stable for the agent's life. One started by voice is named from the request; the desk-alerts plugin names
+         one started at the desk once, from its first task. Until then it's `new-<pane>` (pane id lowercased, `:` as
+         `-`). See agent_names.py.
+  kind   the agent kind as people write it: Claude, Codex, omp, Grok.
+  task   what it's doing now, from the title the agent gives its terminal without the agent's own chrome; "New
+         session" before it has a task.
+  state  herdr's status as working, waiting (blocked on a question), done or idle.
+  card   for a blocked agent, a question card with its screen (Vux reads the question from it); for a done agent whose
+         finish no one has told the user yet, a result card, with the start of its last reply (Claude Code and Codex,
+         on this machine); else null. An agent herdr-voice handed off (its mark in ~/.cache/herdr-voice/handed-off)
+         gets no result card: Hermes reports that one in the conversation.
+Pane and tab labels aren't read: they're the user's and other plugins' (herdr.auto-title rewrites them as the work
+changes), and herdr-voice never writes them.
 
 realert: has the desk-alerts plugin alert again for a pane whose dialog moved on to another question, and clears the
 pane's hand-off mark (below), so the plugin reports the pane from then on.
@@ -36,18 +48,17 @@ Stdlib only.
 """
 import hashlib
 import json
-import re
 import socket
 import subprocess
 import sys
 import time
-import unicodedata
 from pathlib import Path
 
-# last_reply.py beside this script, however it's loaded, without writing bytecode beside it: Hermes calls a new file in a
-# skill's folder a local edit and won't update the skill over it.
+# last_reply.py and agent_names.py beside this script, however it's loaded, without writing bytecode beside them: Hermes
+# calls a new file in a skill's folder a local edit and won't update the skill over it.
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent_names import kind_name, name, task  # noqa: E402
 from last_reply import last_reply  # noqa: E402
 
 STATES = {"working": "working", "blocked": "waiting", "done": "done", "idle": "idle"}
@@ -55,11 +66,6 @@ HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
 # The start of a result Vux shows on the agent's row (its first line or two); Hear gets the whole of it.
 RESULT_TEXT = 300
-# An item's name fits one line on a phone.
-NAME_LENGTH = 40
-# How each agent kind is written, where that isn't its kind capitalized (herdr agent start --help lists the kinds).
-KIND_NAMES = {"omp": "omp", "pi": "pi", "agy": "Antigravity", "opencode": "OpenCode", "qodercli": "Qoder",
-              "mastracode": "Mastra Code"}
 
 
 class HerdrError(Exception):
@@ -162,63 +168,6 @@ def create(name, machine=None):
                         "location": machine or this_machine()}}
 
 
-def plain(text):
-    """Text without icon-font glyphs (Nerd Fonts' private-use characters, which a phone can't show and speech would
-    read), spaces folded."""
-    kept = "".join(c for c in text or "" if not (0xE000 <= ord(c) <= 0xF8FF or ord(c) >= 0xF0000))
-    return " ".join(kept.split())
-
-
-def kind_name(kind):
-    """An agent kind as people write it: Claude, Codex, omp."""
-    return KIND_NAMES.get(kind) or (kind or "agent").capitalize()
-
-
-def task_title(agent, workspace_label=None):
-    """What the agent is working on: the title it gives its terminal, without the agent's own chrome around it (status
-    glyphs, omp's "π > ", Grok's " - grok", Codex's " | <folder>"); "" when the title only names the agent or its folder
-    (an agent that hasn't been given a task yet). Agents set it once per task, so it holds while the agent works."""
-    kind = agent.get("agent") or ""
-    folder = (agent.get("cwd") or "").rstrip("/").rsplit("/", 1)[-1]
-    title = plain(agent.get("terminal_title_stripped") or agent.get("terminal_title"))
-    # Status glyphs ahead of the title: spinners, ✳, bullets.
-    title = title.lstrip("•· ").lstrip()
-    while title and unicodedata.category(title[0]) == "So":
-        title = title[1:].lstrip()
-    title = re.sub(r"^π\s*[>›»:-]\s*", "", title)
-    for tail in filter(None, {kind, kind_name(kind), folder}):
-        title = re.sub(rf"\s+[-–—|·]\s+{re.escape(tail)}$", "", title, flags=re.I)
-    generic = {kind, kind_name(kind), f"{kind_name(kind)} code", f"{kind} cli", folder, workspace_label or "", "~"}
-    return "" if title.lower() in {g.lower() for g in generic} else title
-
-
-# Words a cut name shouldn't end on: "Cybersecurity advisories and…" says less than "Cybersecurity advisories…".
-DANGLING = {"a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of", "on", "or", "the", "to", "with"}
-
-
-def short(text, limit=NAME_LENGTH):
-    """Text cut to fit a line, at a word where there's one, with an ellipsis."""
-    if len(text) <= limit:
-        return text
-    words = text[:limit - 1].split(" ")
-    if len(words) > 1:
-        # Drop the last word if it's cut through, and any small word left dangling.
-        if text[limit - 1] != " ":
-            words.pop()
-        while len(words) > 1 and words[-1].lower() in DANGLING:
-            words.pop()
-    return " ".join(words).rstrip(" ,;:-–—|·") + "…"
-
-
-def item_name(agent, label, title, where):
-    """What Vux calls an agent, the way the skill speaks of it: the name it was started with (herdr-voice's, taken from
-    the task), else its pane's label if someone renamed it, else what it's working on, else its kind and tab as herdr's
-    sidebar shows them. The first two never change on their own; a title changes only with a new task."""
-    kind = kind_name(agent.get("agent"))
-    return (plain(agent.get("name") or label or "") or short(title)
-            or (f"{kind} · {where}" if where else kind))
-
-
 def screen_text(screen):
     """The screen without trailing spaces and blank lines, newest 6000 characters (as desk-alerts sends it)."""
     lines = [line.rstrip() for line in screen.splitlines()]
@@ -270,27 +219,13 @@ def agent_items(machine, workspace=None):
         agents = [a for a in agents if a.get("workspace_id") == workspace]
     if not agents:
         return []
-    panes = {p["pane_id"]: p for p in herdr_json("pane", "list", machine=machine)["panes"]}
-    tabs = herdr_json("tab", "list", machine=machine)["tabs"]
     labels = {w["workspace_id"]: w.get("label") for w in herdr_json("workspace", "list", machine=machine)["workspaces"]}
     now = time.time()
     items = []
     for agent in agents:
-        pane = panes.get(agent["pane_id"]) or {}
-        # A pane's label is its terminal title (cut short) until it's renamed, by the user or a plugin such as Auto Title.
-        title = pane.get("terminal_title_stripped") or ""
-        label = pane.get("label") if pane.get("label") and not title.startswith(pane["label"]) else None
-        siblings = [t for t in tabs if t.get("workspace_id") == agent.get("workspace_id")]
-        tab = next((t for t in siblings if t["tab_id"] == agent.get("tab_id")), None)
-        where = (tab.get("label") if tab and tab.get("label") and not tab["label"][:1].isdigit() else
-                 str(siblings.index(tab) + 1) if tab else "")
-        doing = task_title(agent, labels.get(agent.get("workspace_id")))
-        name = item_name(agent, label, doing, where)
-        kind = kind_name(agent.get("agent"))
-        # The kind, and what it's on when the name doesn't already say so.
-        detail = kind if not doing or name == short(doing) else f"{kind} · {doing}"
         state = STATES.get(agent.get("agent_status"), "idle")
-        item = {"id": agent["pane_id"], "name": name, "state": state, "detail": detail}
+        item = {"id": agent["pane_id"], "name": name(agent), "kind": kind_name(agent.get("agent")),
+                "task": task(agent, labels.get(agent.get("workspace_id"))), "state": state, "card": None}
         if state == "waiting":
             try:
                 screen = screen_text(herdr("agent", "read", agent["pane_id"], "--source", "visible", machine=machine))
@@ -305,14 +240,6 @@ def agent_items(machine, workspace=None):
             if text:
                 item["card"]["text"] = text
         items.append((joined(machine, agent.get("workspace_id", "")), item))
-    # Two agents a person couldn't tell apart (two untitled omps in one tab, two on the same task): the second is
-    # "omp · 1 · 2", and so on. Names are how the user and the agent refer to agents by voice.
-    seen = {}
-    for context, item in items:
-        key = (context, item["name"])
-        seen[key] = seen.get(key, 0) + 1
-        if seen[key] > 1:
-            item["name"] = f"{item['name']} · {seen[key]}"
     return items
 
 

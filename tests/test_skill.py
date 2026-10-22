@@ -36,6 +36,8 @@ def _block(lines, indent):
 def _scalar(value):
     if value in ("true", "false"):
         return value == "true"
+    if value.isdigit():
+        return int(value)
     return value[1:-1] if value[:1] == value[-1:] == '"' else value
 
 
@@ -89,6 +91,8 @@ class Frontmatter(unittest.TestCase):
         for placeholder in ("{name}", "{location}", "{id}"):
             self.assertIn(placeholder, scope)
         self.assertNotIn("{", scope.replace("{name}", "").replace("{location}", "").replace("{id}", ""))
+        # Item format 2: id, name (the herdr agent name), kind, task, state and card on every item.
+        self.assertEqual(vux["items"]["version"], 2)
         self.assertTrue(set(vux["items"]["push"]) <= {"working", "waiting", "done", "failed", "idle"})
         self.assertEqual(vux["items"]["push"], ["waiting", "done"])
 
@@ -179,11 +183,15 @@ class Recipes(unittest.TestCase):
         for needle in ("agent_session", "~/.claude/projects/", "grep -l", "named as in **What's running**", "read-only"):
             self.assertIn(needle, section)
 
-    def test_names_agents_by_label_not_pane_id(self):
+    def test_names_agents_by_name_never_by_label_or_pane_id(self):
+        # Every agent has a herdr agent name, once (Vux shows the same); pane and tab labels are the user's and Auto
+        # Title's, rewritten as the work changes, so they're never names, and the skill never writes them.
         section = TEXT.split("**What's running:**")[1].split("\n**")[0]
-        # A pane's label is its terminal title until it's renamed.
-        for needle in ("pane's label", "`terminal_title_stripped`", "Never say a `pane_id` to the user"):
+        for needle in ("by its `name`", "`new-<pane>`", "`scripts/agent_names.py`", "`terminal_title_stripped`",
+                       "Pane and tab labels aren't names", "never rename a pane or tab", "Never say a `pane_id` to the user"):
             self.assertIn(needle, section)
+        for stale in ("pane's label", "herdr pane rename", "herdr tab rename", "a `label` counts"):
+            self.assertNotIn(stale, TEXT)
 
     def test_voice_vocabulary_maps_to_recipes(self):
         self.assertIn("## Voice vocabulary", TEXT)

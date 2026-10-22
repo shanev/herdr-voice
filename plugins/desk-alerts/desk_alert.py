@@ -15,6 +15,12 @@ A question stays on the user's phone until its pane moves on: the agent was answ
 went back to work, quit, or its pane closed or moved. Then the hook reports the change again, and the agent withdraws
 the question.
 
+Every agent gets a herdr agent name, once: herdr-voice names those it starts by voice, and this hook names an agent
+started at the desk from its first task (`herdr agent rename`, by the skill's rule in agent_names.py): at any pane
+event, each agent without a name whose terminal title shows a task. One that starts working untitled is looked at again
+for a while (`desk_alert.py name <pane>`, detached). A named agent is never renamed. Pane and tab labels are neither
+read nor written: they're the user's and other plugins' (herdr.auto-title).
+
 `desk_alert.py realert <pane>` alerts again for an agent still blocked after an answer, when its dialog moved on to
 another question.
 
@@ -36,6 +42,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+# How the skill names agents (its scripts/agent_names.py), from the repo herdr installs this plugin from, where
+# plugins/desk-alerts sits beside skills/herdr-voice: one rule for both. No bytecode is written there (herdr's checkout
+# of the repo stays as installed).
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "herdr-voice" / "scripts"))
+import agent_names  # noqa: E402
+
 # The skill whose items these are (its SKILL.md declares them for Vux).
 SKILL = "herdr-voice"
 # herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off (its
@@ -52,6 +65,12 @@ DEFAULT_VUX_AGENT_PORT = 8650
 # Claude can end a reply while a command it started is still running: done, then working again.
 # An alert waits this long and is dropped if the agent went back to work.
 DEFAULT_SETTLE_SECONDS = 20
+
+
+# An agent started at the desk is named once its first task's title shows. Claude titles its terminal a moment after the
+# prompt, so an agent that starts working untitled is looked at again this often, for this long.
+NAME_EVERY_SECONDS = 2
+NAME_WAIT_SECONDS = 120
 
 
 # Changes to which workspaces there are: Vux's list of contexts.
@@ -233,16 +252,125 @@ def settings(config_dir, hermes_env, vux_agent=None):
 def herdr(*args):
     binary = os.environ.get("HERDR_BIN_PATH") or "herdr"
     result = subprocess.run([binary, *args], capture_output=True, text=True, timeout=20)
-    return result.returncode, result.stdout
+    return result.returncode, result.stdout, result.stderr
+
+
+def herdr_error(err):
+    """The error code herdr prints on failure (`{"error": {"code": ...}}`), or None."""
+    try:
+        return json.loads(err)["error"]["code"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
 
 
 def running_agent(pane):
     """The agent in the pane, or None once it has quit (an exit also reports `done`)."""
-    code, out = herdr("agent", "get", pane)
+    code, out, _ = herdr("agent", "get", pane)
     try:
         return json.loads(out)["result"]["agent"] if code == 0 else None
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
+
+
+class HerdrFailed(Exception):
+    pass
+
+
+def herdr_json(*args):
+    code, out, err = herdr(*args)
+    if code != 0:
+        raise HerdrFailed(f"`herdr {' '.join(args)}` failed: {err.strip()[:300]}")
+    try:
+        return json.loads(out)["result"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        raise HerdrFailed(f"`herdr {' '.join(args)}` printed no result") from None
+
+
+def name_agents(state, skip=()):
+    """Gives every agent without a herdr agent name one, once it has a task (its terminal title, cleaned as the skill's
+    agent_names.task_title cleans it, says what it's on): the name the skill's rule makes of the task, unique among
+    herdr's live agents. An agent with a name, the user's, the voice recipe's or this one's, is never renamed: a name
+    stays for the agent's life. Pane labels aren't read or written.
+
+    Hooks run at once for herdr's events, so the look and the rename happen under a lock: a second hook sees the name
+    the first gave. Panes in `skip` (one whose agent was only just detected, its title maybe still the shell's) wait for
+    a later event. Returns the agents it named, as (workspace, pane, name), and the panes of unnamed agents that have
+    no task yet. herdr failing is reported and names nothing: alerts go on without it."""
+    try:
+        with _lock(state / "naming.lock"):
+            agents = herdr_json("agent", "list")["agents"]
+            unnamed = [a for a in agents if not a.get("name") and a.get("agent") and a.get("pane_id") not in skip
+                       and a.get("agent_status") != "unknown"]
+            if not any(agent_names.task_title(a) for a in unnamed):
+                return [], [a["pane_id"] for a in unnamed]
+            labels = {w["workspace_id"]: w.get("label") for w in herdr_json("workspace", "list")["workspaces"]}
+            taken = {a["name"] for a in agents if a.get("name")}
+            named, untitled = [], []
+            for agent in unnamed:
+                base = agent_names.base_name(agent, labels.get(agent.get("workspace_id")))
+                if base is None:
+                    untitled.append(agent["pane_id"])
+                    continue
+                given = rename(agent["pane_id"], base, taken)
+                if given:
+                    named.append((agent.get("workspace_id"), agent["pane_id"], given))
+            return named, untitled
+    except (HerdrFailed, OSError, subprocess.SubprocessError) as error:
+        print(f"desk-alerts: agents not named: {error}", file=sys.stderr)
+        return [], []
+
+
+def rename(pane, base, taken):
+    """Names the pane's agent `base`, or `base-2`, `base-3`… : the first no live agent has, by `taken` and then by herdr
+    (names are unique among the server's live agents, and one may have been named since the list). Returns the name
+    given, or None when herdr refuses otherwise (the agent quit)."""
+    for _ in range(20):
+        name = agent_names.unique(base, taken)
+        code, _, err = herdr("agent", "rename", pane, name)
+        if code == 0:
+            taken.add(name)
+            return name
+        if herdr_error(err) != "agent_name_taken":
+            print(f"desk-alerts: {pane} not named {name}: {err.strip()[:300]}", file=sys.stderr)
+            return None
+        taken.add(name)
+    print(f"desk-alerts: {pane} not named: every name from {base} to {name} is taken", file=sys.stderr)
+    return None
+
+
+class _lock:
+    """An exclusive lock on a file, for the length of a with block."""
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = open(self.path, "a", encoding="utf-8")
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+
+    def __exit__(self, *_):
+        self.handle.close()
+
+
+def name_when_titled(state, config, pane):
+    """For an unnamed agent that started working before its title said what on: looks again every
+    NAME_EVERY_SECONDS, for up to NAME_WAIT_SECONDS, and names it once the title shows (or stops when it's gone or
+    named). Runs detached from the hook. Vux hears of each agent named."""
+    deadline = time.monotonic() + NAME_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(NAME_EVERY_SECONDS)
+        named, untitled = name_agents(state)
+        report_named(config, named)
+        if pane not in untitled:
+            return
+
+
+def report_named(config, named, already=None):
+    """Tells Vux's agents about agents just named (each a changed item, for the open stream), but the one `already`
+    reported."""
+    for workspace, pane, _ in named:
+        if pane != already:
+            changed(config, workspace, pane, push=False)
 
 
 def post(url, key, body, timeout):
@@ -298,6 +426,10 @@ def main():
         alert_when_settled(payload["config"], payload["pane"], payload["status"], Path(payload["statuses"]),
                            payload["event"])
         return
+    if len(sys.argv) == 3 and sys.argv[1] == "name":
+        state = state_dir()
+        name_when_titled(state, config_for(state), sys.argv[2])
+        return
     event = json.loads(os.environ.get("HERDR_PLUGIN_EVENT_JSON") or "{}").get("data") or {}
     state = state_dir()
     statuses = state / "statuses.json"
@@ -308,7 +440,11 @@ def main():
         changed(config_for(state), None, push=False)
         return
     if kind == "pane_agent_detected":
-        changed(config_for(state), event.get("workspace_id"), event.get("pane_id"), push=False)
+        # Desk agents get their names at any event once they have a task; this one's title may still be its shell's.
+        config = config_for(state)
+        named, _ = name_agents(state, skip={event.get("pane_id")})
+        report_named(config, named)
+        changed(config, event.get("workspace_id"), event.get("pane_id"), push=False)
         return
     gone = gone_pane(event)
     if gone:
@@ -323,6 +459,11 @@ def main():
     previous, event_number = record_status(statuses, pane, status, event.get("workspace_id"))
     if previous == status:
         return
+    config = config_for(state)
+    named, untitled = name_agents(state)
+    report_named(config, named, already=pane)
+    if status == "working" and pane in untitled:
+        name_detached(state, pane)
     resolved, alert = is_resolved(previous, status), is_alert(previous, status)
     agent = running_agent(pane) if resolved or alert else None
     workspace = event.get("workspace_id") or (agent or {}).get("workspace_id") or recorded_workspace(statuses, pane)
@@ -330,7 +471,6 @@ def main():
         workspace = (running_agent(pane) or {}).get("workspace_id")
     if workspace:
         remember_workspace(statuses, pane, workspace)
-    config = config_for(state)
     changed(config, workspace, pane, push=resolved)
     if not alert or agent is None or take_hand_off([pane, agent.get("name")], time.time()):
         return
@@ -360,6 +500,13 @@ def deliver_detached(state, config, pane, status, event_number):
         child.stdin.write(json.dumps({"config": config, "pane": pane, "status": status,
                                      "statuses": str(state / "statuses.json"), "event": event_number}))
         child.stdin.close()
+
+
+def name_detached(state, pane):
+    """Names the pane's agent once its title shows (`name_when_titled`), in a child of its own: the hook returns now."""
+    with open(state / "deliver.log", "a", encoding="utf-8") as log:
+        subprocess.Popen([sys.executable, __file__, "name", pane], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         start_new_session=True)
 
 
 def realert(pane):
