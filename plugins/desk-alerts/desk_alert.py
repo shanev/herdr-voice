@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Herdr event hook: tells Hark's agent when a coding agent at the desk finishes or stops on a question.
+"""Herdr event hook: tells Vux's agents when a coding agent at the desk finishes or stops on a question.
 
-Hark doesn't poll the agent: every change it shows (an agent detected or gone, each status change, a pane closed,
-exited or moved, a workspace made, closed, renamed or moved) is reported at once with `"push": false`, for Hark's open
+Vux doesn't poll the agent: every change it shows (an agent detected or gone, each status change, a pane closed,
+exited or moved, a workspace made, closed, renamed or moved) is reported at once with `"push": false`, for Vux's open
 event stream only. On `pane.agent_status_changed`, an agent that goes from working to done or blocked while the user
-is away from the computer is also news for a push, once settled. The hook tells the agent (Hermes with Hark's hark-auth plugin 1.8 or later, else Hark's own agent)
-that the agent's workspace changed: `POST /v1/skills/herdr-voice/changed` with the workspace and pane. Every agent on
-the machine is told at once (Hermes and Hark's agent each serve Hark a stream); each pushes only to its own phones. The agent reads
-the workspace's agents with the skill's `scripts/hark_state.py` and pushes the change to the user's phone, with the
+is away from the computer is also news for a push, once settled. The hook tells the agents (Hermes with Vux's vux-auth
+plugin, or hark-auth 1.8 or later from before Hark became Vux, and Vux's own agent, vux-agent) that the agent's
+workspace changed: `POST /v1/skills/herdr-voice/changed` with the workspace and pane. Every agent on the machine is
+told at once (Hermes and vux-agent each serve Vux a stream); each pushes only to its own phones. The agent reads
+the workspace's agents with the skill's `scripts/vux_state.py` and pushes the change to the user's phone, with the
 question card of a blocked agent. Agents herdr-voice handed off are skipped: Hermes already waits for those.
 
-A question stays on the user's phone until its pane moves on: the agent was answered (at the desk or through Hark) and
+A question stays on the user's phone until its pane moves on: the agent was answered (at the desk or through Vux) and
 went back to work, quit, or its pane closed or moved. Then the hook reports the change again, and the agent withdraws
 the question.
 
@@ -19,8 +20,9 @@ another question.
 
 Settings, all optional, in this plugin's config dir `.env` (`herdr plugin config-dir herdr-voice.desk-alerts`):
 AWAY_AFTER_MINUTES (default 5; 0 alerts even at the desk), SETTLE_SECONDS (default 20), HERMES_API_URL and
-HERMES_API_KEY (an agent to tell first, besides Hermes (API_SERVER_PORT and API_SERVER_KEY in ~/.hermes/.env) and Hark's
-agent (PORT and key in ~/.vux-agent, or ~/.hark-agent from before Hark became Vux), each told when it's there). Stdlib only.
+HERMES_API_KEY (an agent to tell first, besides Hermes (API_SERVER_PORT and API_SERVER_KEY in ~/.hermes/.env) and
+vux-agent (PORT and key in ~/.vux-agent, or ~/.hark-agent from before Hark became Vux), each told when it's there).
+Stdlib only.
 """
 import fcntl
 import json
@@ -34,9 +36,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# The skill whose items these are (its SKILL.md declares them for Hark).
+# The skill whose items these are (its SKILL.md declares them for Vux).
 SKILL = "herdr-voice"
-# herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off.
+# herdr-voice writes a file here, named for the pane id or agent name, when it hands a task off (its
+# `scripts/vux_state.py mark`), and clears the pane's when it has the plugin alert again (`realert`).
 HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
 # A finish this soon after a handed-off one is the same task (Claude ended a reply, worked on, ended again).
@@ -45,13 +48,13 @@ DEFAULT_AWAY_MINUTES = 5
 DEFAULT_PORT = 8642
 # Vux's own agent, and where it lived while Vux was called Hark: the first of them with a key is the one.
 VUX_AGENT_HOMES = (Path.home() / ".vux-agent", Path.home() / ".hark-agent")
-DEFAULT_HARK_AGENT_PORT = 8650
+DEFAULT_VUX_AGENT_PORT = 8650
 # Claude can end a reply while a command it started is still running: done, then working again.
 # An alert waits this long and is dropped if the agent went back to work.
 DEFAULT_SETTLE_SECONDS = 20
 
 
-# Changes to which workspaces there are: Hark's list of contexts.
+# Changes to which workspaces there are: Vux's list of contexts.
 WORKSPACE_EVENTS = {"workspace_created", "workspace_closed", "workspace_renamed", "workspace_moved", "workspace_reordered"}
 
 
@@ -135,7 +138,7 @@ class _statuses:
 
 def take_hand_off(names, now, folder=HANDED_OFF):
     """True when herdr-voice handed this agent's task off (it reports that one itself). The mark is used up: it becomes
-    `<name>.finished`, which tells the skill's hark_state.py this finish is Hermes' to tell, until the agent's next task
+    `<name>.finished`, which tells the skill's vux_state.py this finish is Hermes' to tell, until the agent's next task
     from the desk finishes, which is alerted (and drops it)."""
     handed_off = False
     for name in filter(None, names):
@@ -196,9 +199,9 @@ def read_key(path):
         return ""
 
 
-def settings(config_dir, hermes_env, hark_agent=None):
-    """Every agent on the machine, each serving Hark its own stream: one named in this plugin's `.env` first, then
-    Hermes, then Hark's own agent, each once."""
+def settings(config_dir, hermes_env, vux_agent=None):
+    """Every agent on the machine, each serving Vux its own stream: one named in this plugin's `.env` first, then
+    Hermes, then vux-agent, each once."""
     own, hermes = read_env_file(Path(config_dir) / ".env"), read_env_file(hermes_env)
     agents = []
     hermes_key = hermes.get("API_SERVER_KEY") or ""
@@ -206,12 +209,12 @@ def settings(config_dir, hermes_env, hark_agent=None):
         agents.append({"url": own["HERMES_API_URL"], "key": own.get("HERMES_API_KEY") or hermes_key})
     if hermes_key:
         agents.append({"url": "http://127.0.0.1:{}".format(hermes.get("API_SERVER_PORT") or DEFAULT_PORT), "key": hermes_key})
-    homes = [Path(hark_agent)] if hark_agent is not None else list(VUX_AGENT_HOMES)
-    hark_agent = next((home for home in homes if read_key(home / "agent-key")), homes[0])
-    agent_key = read_key(hark_agent / "agent-key")
+    homes = [Path(vux_agent)] if vux_agent is not None else list(VUX_AGENT_HOMES)
+    vux_agent = next((home for home in homes if read_key(home / "agent-key")), homes[0])
+    agent_key = read_key(vux_agent / "agent-key")
     if agent_key:
         agents.append({"url": "http://127.0.0.1:{}".format(
-            read_env_file(Path(hark_agent) / "env").get("PORT") or DEFAULT_HARK_AGENT_PORT), "key": agent_key})
+            read_env_file(Path(vux_agent) / "env").get("PORT") or DEFAULT_VUX_AGENT_PORT), "key": agent_key})
     seen = set()
     agents = [a for a in ({"url": a["url"].rstrip("/"), "key": a["key"]} for a in agents)
               if not (a["url"] in seen or seen.add(a["url"]))]
@@ -225,11 +228,6 @@ def settings(config_dir, hermes_env, hark_agent=None):
         "away_after_minutes": number("AWAY_AFTER_MINUTES", DEFAULT_AWAY_MINUTES),
         "settle_seconds": number("SETTLE_SECONDS", DEFAULT_SETTLE_SECONDS),
     }
-
-
-def hand_off_command(pane):
-    """What marks the agent as Hermes' to report (herdr-voice's SKILL.md runs the same)."""
-    return f"mkdir -p ~/.cache/herdr-voice/handed-off && touch ~/.cache/herdr-voice/handed-off/{pane}"
 
 
 def herdr(*args):
@@ -267,10 +265,10 @@ def alert_when_settled(config, pane, status, statuses, event):
 
 
 def changed(config, workspace, pane=None, push=True):
-    """Tells Hark's agent the workspace changed (the pane's agent in it, if given), or, without a workspace, which
-    workspaces there are: it reads them again and sends them to Hark's open stream, or, while Hark is closed, pushes
+    """Tells Vux's agents the workspace changed (the pane's agent in it, if given), or, without a workspace, which
+    workspaces there are: each reads them again and sends them to Vux's open stream, or, while Vux is closed, pushes
     or withdraws what's new. `push=False` is for the stream only (the agent still withdraws a question that's over).
-    Every agent on the machine is told, at once, since each serves Hark its own stream: a slow one holds up none of the
+    Every agent on the machine is told, at once, since each serves Vux its own stream: a slow one holds up none of the
     others. Each may push: an agent pushes only to the phones paired with it. An agent without skill state (404), or one
     that's down, is skipped, and the rest are still told."""
     if pane and not workspace:
@@ -303,7 +301,7 @@ def main():
     event = json.loads(os.environ.get("HERDR_PLUGIN_EVENT_JSON") or "{}").get("data") or {}
     state = state_dir()
     statuses = state / "statuses.json"
-    # Hark doesn't poll: every change it shows is reported at once, for its open stream (`push=False`). Only a question
+    # Vux doesn't poll: every change it shows is reported at once, for its open stream (`push=False`). Only a question
     # that's over (to withdraw it) and a settled alert (below) may push.
     kind = event.get("type")
     if kind in WORKSPACE_EVENTS:

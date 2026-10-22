@@ -1,4 +1,4 @@
-"""scripts/hark_state.py end to end: the script runs as Hark's agent runs it (a subprocess, in the skill's folder), against
+"""scripts/vux_state.py end to end: the script runs as vux-agent runs it (a subprocess, in the skill's folder), against
 a stand-in `herdr` on PATH that answers from recorded JSON and logs every call."""
 import hashlib
 import json
@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent / "skills" / "herdr-voice"
-SCRIPT = "scripts/hark_state.py"
+SCRIPT = "scripts/vux_state.py"
 
 # The stand-in: `herdr [--machine M] <command...>` prints answers[<machine>|<command>] and logs the call. A missing
 # answer for a machine fails like an unreachable one.
@@ -48,7 +48,7 @@ AGENTS = [
     {"agent": "claude", "agent_status": "done", "pane_id": "w5M:p3", "tab_id": "w5M:t2", "workspace_id": "w5M",
      "terminal_title_stripped": "PR opened", "completion_seq": 42},
     {"agent": "omp", "agent_status": "idle", "pane_id": "w5M:p4", "tab_id": "w5M:t3", "workspace_id": "w5M",
-     "terminal_title_stripped": "Waiting"},
+     "terminal_title_stripped": "π > \U000f03e2 hark", "cwd": "/home/me/hark"},
     {"agent": "pi", "agent_status": "unknown", "pane_id": "w1P:p8", "tab_id": "w1P:t7", "workspace_id": "w1P",
      "terminal_title_stripped": ""},
     {"agent": "claude", "agent_status": "done", "name": "handed", "pane_id": "w5M:p5", "tab_id": "w5M:t3",
@@ -62,14 +62,15 @@ PANES = [
 ]
 TABS = [{"tab_id": "w5M:t1", "workspace_id": "w5M", "label": "1 · Fixing"}, {"tab_id": "w1P:t7", "workspace_id": "w1P", "label": "1 · x"},
         {"tab_id": "w5M:t2", "workspace_id": "w5M", "label": "2 · PR"}, {"tab_id": "w5M:t3", "workspace_id": "w5M", "label": "mine"}]
-WORKSPACES = [{"workspace_id": "w1P", "label": "asterism"}, {"workspace_id": "w5M", "label": "hark"}, {"workspace_id": "w9"}]
+WORKSPACES = [{"workspace_id": "w1P", "label": "asterism"}, {"workspace_id": "w5M", "label": "hark"}, {"workspace_id": "w9"},
+              {"workspace_id": "wBE", "label": "~"}]
 
 
-# The start of the done Claude's last reply, for Hark's row: 300 characters at most, cut at a word.
+# The start of the done Claude's last reply, for Vux's row: 300 characters at most, cut at a word.
 RESULT_TEXT = "Opened #12 for the swipe fix.\nAll checks green.\n\n" + "More detail. " * 18 + "More detail.…"
 
 
-class HarkState(unittest.TestCase):
+class VuxState(unittest.TestCase):
     def setUp(self):
         self.folder = Path(tempfile.mkdtemp())
         self.bin = self.folder / "bin"
@@ -129,24 +130,28 @@ class HarkState(unittest.TestCase):
             {"id": "w1P", "name": "asterism", "location": local},
             {"id": "w5M", "name": "hark", "location": local},
             {"id": "w9", "name": "Workspace w9", "location": local},
+            # The home folder's workspace, labelled "~" by herdr.
+            {"id": "wBE", "name": "Home", "location": local},
         ])
-        # Another machine's workspaces are that machine's computer's in Hark: its own desk alerts report them live.
+        # Another machine's workspaces are that machine's computer's in Vux: its own desk alerts report them live.
         self.assertEqual([c for c in self.calls() if c["machine"] or c["args"][:1] == ["machine"]], [])
 
     def test_items_are_the_workspaces_agents(self):
         items = self.run_state("items", "w5M")["items"]
         question = hashlib.sha256(SCREEN_TEXT.encode()).hexdigest()[:16]
         self.assertEqual(items, [
-            {"id": "w5M:p1", "name": "apple-models", "state": "working", "detail": "Fixing the swipe test"},
+            # The name it was started with; its kind and what it's on below.
+            {"id": "w5M:p1", "name": "apple-models", "state": "working", "detail": "Claude · Fixing the swipe test"},
             # No name: its pane's label, once renamed (not the terminal title), with the question read from its screen.
-            {"id": "w5M:p2", "name": "reviewer", "state": "waiting", "detail": "Bash prompt",
+            {"id": "w5M:p2", "name": "reviewer", "state": "waiting", "detail": "Codex · Bash prompt",
              "card": {"kind": "question", "id": question, "screen": SCREEN_TEXT}},
-            # Neither: its kind and tab, as herdr's sidebar numbers tabs; done with a result the user hasn't heard.
-            {"id": "w5M:p3", "name": "Claude · 2", "state": "done", "detail": "PR opened",
+            # Neither: what it's working on; done with a result the user hasn't heard.
+            {"id": "w5M:p3", "name": "PR opened", "state": "done", "detail": "Claude",
              "card": {"kind": "result", "id": "w5M:p3:42", "text": RESULT_TEXT}},
-            {"id": "w5M:p4", "name": "Omp · mine", "state": "idle", "detail": "Waiting"},
+            # No task yet (its title only names its folder): its kind and tab, as herdr's sidebar shows the tab.
+            {"id": "w5M:p4", "name": "omp · mine", "state": "idle", "detail": "omp"},
             # Handed off by herdr-voice: Hermes tells its result in the conversation, so no card.
-            {"id": "w5M:p5", "name": "handed", "state": "done", "detail": "Tests pass"},
+            {"id": "w5M:p5", "name": "handed", "state": "done", "detail": "Claude · Tests pass"},
         ])
 
     def test_running_leaves_the_skills_folder_as_installed(self):
@@ -190,6 +195,9 @@ class HarkState(unittest.TestCase):
         self.assertEqual(self.run_state("create", "hark", "vega"),
                          {"context": {"id": "vega@vega/w2", "name": "hark", "location": "vega@vega"}})
         self.assertEqual(self.run_state("create", "Hark")["context"]["id"], "w5M")
+        # "Home", as Vux shows the home folder's workspace, is that one ("~").
+        self.assertEqual(self.run_state("create", "home")["context"], {"id": "wBE", "name": "Home",
+                                                                       "location": os.uname().nodename.split(".")[0]})
         self.assertFalse([c for c in self.calls() if c["args"][:2] == ["workspace", "create"]], "a second workspace")
 
     def test_realert_runs_the_desk_alerts_plugin(self):
@@ -201,23 +209,107 @@ class HarkState(unittest.TestCase):
         self.run_state("realert", "w5M:p2", check=False)
         self.assertEqual((plugin / "ran").read_text(), "realert w5M:p2")
 
+    def test_realert_hands_the_pane_back_to_the_plugin(self):
+        # Answered from its card, the agent was marked as the agent's to report; it asked another question, so the
+        # plugin alerts for it again, and its finish is the plugin's to report: realert clears its marks, by pane id
+        # and by its agent's name, and leaves other agents' alone. The skill never runs `rm` for this.
+        marks = self.home / ".cache" / "herdr-voice" / "handed-off"
+        for name in ("w5M:p2", "w5M:p2.finished", "reviewer-bot", "w5M:p1", "apple-models"):
+            (marks / name).touch()
+        self.answers["|agent get w5M:p2"] = result({"agent": {**AGENTS[1], "name": "reviewer-bot"}})
+        self.answers["|plugin list --json"] = result({"plugins": [{"plugin_id": "herdr-voice.desk-alerts",
+                                                                   "plugin_root": str(self.folder / "none")}]})
+        self.run_state("realert", "w5M:p2", check=False)
+        self.assertEqual(sorted(p.name for p in marks.iterdir()), ["apple-models", "handed.finished", "w5M:p1"])
+        # Without the plugin, the marks are cleared all the same, and it says why no alert comes.
+        (marks / "w5M:p2").touch()
+        self.answers["|plugin list --json"] = result({"plugins": []})
+        done = self.run_state("realert", "w5M:p2", check=False)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("desk-alerts plugin isn't installed", done.stderr)
+        self.assertFalse((marks / "w5M:p2").exists())
+
+    def test_a_marked_agent_gets_no_result_card(self):
+        # `mark` is how the skill hands a task off: the agent reports that result in its conversation, so the row
+        # doesn't offer it too.
+        done = self.run_state("mark", "w5M:p3", check=False)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.home / ".cache" / "herdr-voice" / "handed-off" / "w5M:p3").exists())
+        item = next(i for i in self.run_state("items", "w5M")["items"] if i["id"] == "w5M:p3")
+        self.assertNotIn("card", item)
+
     def test_names_tell_agents_apart_and_a_cut_title_is_no_label(self):
-        # Two unnamed omps in one tab; a pane whose label is only its terminal title cut short (herdr does that at 50).
+        # Two omps in one tab with no task yet, two Claudes on the same task, and a pane whose label is only its
+        # terminal title cut short (herdr does that at 50).
         title = "Build SAFT investor reconciliation table for the auditors"
         self.answers["|agent list"] = result({"agents": [
             {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p1", "tab_id": "w7F:t1", "workspace_id": "w7F",
-             "terminal_title_stripped": "One"},
+             "terminal_title_stripped": "π - cybertruck", "cwd": "/home/me/cybertruck"},
             {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p3", "tab_id": "w7F:t1", "workspace_id": "w7F",
-             "terminal_title_stripped": "Two"},
+             "terminal_title_stripped": ""},
             {"agent": "omp", "agent_status": "idle", "pane_id": "w7F:p4", "tab_id": "w7F:t1", "workspace_id": "w7F",
-             "terminal_title_stripped": title}]})
+             "terminal_title_stripped": title},
+            {"agent": "claude", "agent_status": "idle", "pane_id": "w7F:p5", "tab_id": "w7F:t2", "workspace_id": "w7F",
+             "terminal_title_stripped": "Fix the flaky test"},
+            {"agent": "claude", "agent_status": "working", "pane_id": "w7F:p6", "tab_id": "w7F:t2", "workspace_id": "w7F",
+             "terminal_title_stripped": "Fix the flaky test"}]})
         self.answers["|pane list"] = result({"panes": [{"pane_id": "w7F:p4", "label": title[:50],
                                                          "terminal_title_stripped": title}]})
-        self.answers["|tab list"] = result({"tabs": [{"tab_id": "w7F:t1", "workspace_id": "w7F", "label": "1 · x"}]})
+        self.answers["|tab list"] = result({"tabs": [{"tab_id": "w7F:t1", "workspace_id": "w7F", "label": "1 · x"},
+                                                     {"tab_id": "w7F:t2", "workspace_id": "w7F", "label": "2 · y"}]})
         names = [i["name"] for i in self.run_state("items", "w7F")["items"]]
-        self.assertEqual(len(set(names)), 3, names)
-        self.assertEqual(names[0], "Omp · 1")
+        self.assertEqual(names, ["omp · 1", "omp · 1 · 2", "Build SAFT investor reconciliation…",
+                                 "Fix the flaky test", "Fix the flaky test · 2"])
         self.assertNotIn(title[:50], names, "A cut terminal title isn't the user's label")
+
+    def test_unnamed_agents_are_named_for_their_task(self):
+        # Titles as Claude Code, omp, Grok and Codex set them (seen on a desk), and what Vux shows for each: the task
+        # as the name, the kind below it.
+        agents = [
+            ("claude", "Tesla Roadster physics simulation", "/u/shanev/asterism"),
+            ("claude", "1Password service account for modelrelay secrets", "/u/me"),
+            ("omp", "π > \U000f03e2 CLIP: Improve MOLLE clip design", "/u/shanev/cybertruck"),
+            ("grok", "Southern Loop Trip: Tampa Over Ohio and Myrtle Beach - grok", "/u/shanev/obsidian"),
+            ("codex", "Check today's cybersecurity issues | cozy", "/u/tensor-systems/cozy"),
+            ("codex", "⠹ Run curl header command | desk-alert-zZma", "/tmp/desk-alert-zZma"),
+            # Before its first prompt: the title names only the agent.
+            ("claude", "Claude Code", "/u/shanev/asterism"),
+        ]
+        self.answers["|agent list"] = result({"agents": [
+            {"agent": kind, "agent_status": "idle", "pane_id": f"w1P:p{n}", "tab_id": f"w1P:t{n}", "workspace_id": "w1P",
+             "terminal_title_stripped": title, "cwd": cwd} for n, (kind, title, cwd) in enumerate(agents)]})
+        self.answers["|pane list"] = result({"panes": []})
+        self.answers["|tab list"] = result({"tabs": [{"tab_id": f"w1P:t{n}", "workspace_id": "w1P", "label": f"{n + 1} · x"}
+                                                     for n in range(len(agents))]})
+        items = self.run_state("items", "w1P")["items"]
+        self.assertEqual([(i["name"], i["detail"]) for i in items], [
+            ("Tesla Roadster physics simulation", "Claude"),
+            # Cut at a word to fit a phone's line, not on a word that leaves it hanging.
+            ("1Password service account…", "Claude"),
+            ("CLIP: Improve MOLLE clip design", "omp"),
+            ("Southern Loop Trip: Tampa Over Ohio…", "Grok"),
+            ("Check today's cybersecurity issues", "Codex"),
+            ("Run curl header command", "Codex"),
+            ("Claude · 7", "Claude"),
+        ])
+        self.assertTrue(all(len(i["name"]) <= 40 for i in items))
+
+    def test_a_working_agents_name_holds(self):
+        # Claude's spinner and omp's status icon redraw the title many times a second; the name the user hears and says
+        # mustn't move with them.
+        names = []
+        for claude, omp in [("✳ Newly added models tweet", "π > \U000f03e2 SKY: Explain why the sky is blue"),
+                            ("◑ Newly added models tweet", "π > \U000f0547 SKY: Explain why the sky is blue"),
+                            ("⠋ Newly added models tweet", "π > SKY: Explain why the sky is blue")]:
+            self.answers["|agent list"] = result({"agents": [
+                {"agent": "claude", "agent_status": "working", "pane_id": "wC3:p2", "tab_id": "wC3:t2", "workspace_id": "wC3",
+                 "terminal_title_stripped": claude},
+                {"agent": "omp", "agent_status": "working", "pane_id": "wC3:p3", "tab_id": "wC3:t2", "workspace_id": "wC3",
+                 "terminal_title_stripped": omp}]})
+            self.answers["|pane list"] = result({"panes": []})
+            self.answers["|tab list"] = result({"tabs": [{"tab_id": "wC3:t2", "workspace_id": "wC3", "label": "2 · x"}]})
+            names.append([i["name"] for i in self.run_state("items", "wC3")["items"]])
+        self.assertEqual(names, [["Newly added models tweet", "SKY: Explain why the sky is blue"]] * 3)
 
     def test_icon_font_glyphs_are_dropped(self):
         # Nerd Font icons (private use) have no glyph on the phone, and speech would read them.
@@ -227,7 +319,7 @@ class HarkState(unittest.TestCase):
         self.answers["|pane list"] = result({"panes": []})
         self.answers["|tab list"] = result({"tabs": [{"tab_id": "w7F:t1", "workspace_id": "w7F", "label": "1 · x"}]})
         [item] = self.run_state("items", "w7F")["items"]
-        self.assertEqual(item["detail"], "π > CLIP: Improve MOLLE clip design")
+        self.assertEqual(item["detail"], "omp · CLIP: Improve MOLLE clip design")
         self.assertEqual(item["name"], "clip")
 
     def test_herdr_failing_is_an_error_not_an_empty_list(self):
