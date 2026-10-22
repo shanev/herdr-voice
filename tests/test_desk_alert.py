@@ -13,13 +13,11 @@ from pathlib import Path
 PLUGIN = Path(__file__).resolve().parent.parent / "plugins" / "desk-alerts"
 SKILL = Path(__file__).resolve().parent.parent / "skills" / "herdr-voice" / "SKILL.md"
 
-# A stand-in herdr, which the plugin runs from HERDR_BIN_PATH as herdr has it do: never the machine's own, whose agents a
-# test must not rename. It answers from state.json beside it (a test's agents and workspaces; without one, every command
-# fails), renames by herdr's rules (names match [a-z][a-z0-9_-]{0,31}, unique among live agents, `taken` naming any
-# given meanwhile) and logs each call. `list_delay` slows `agent list`, so two hooks at once both list before either
-# renames.
+# A stand-in herdr, which the plugin runs from HERDR_BIN_PATH as herdr has it do: never the machine's own, which a test
+# must not reach. It answers reads from state.json beside it (a test's agents and workspaces; without one, every command
+# fails), fails every other command, and logs each call.
 FAKE_HERDR = r'''#!/usr/bin/env python3
-import fcntl, json, os, re, sys, time
+import json, os, sys
 here = os.path.dirname(os.path.abspath(__file__))
 args = sys.argv[1:]
 with open(os.path.join(here, "calls.log"), "a") as log:
@@ -35,27 +33,12 @@ if not os.path.exists(path):
 state = json.load(open(path))
 find = lambda agents, target: next((a for a in agents if target in (a["pane_id"], a.get("name"))), None)
 if args == ["agent", "list"]:
-    time.sleep(state.get("list_delay", 0))
     reply({"agents": state["agents"]})
 elif args == ["workspace", "list"]:
     reply({"workspaces": state.get("workspaces", [])})
 elif args[:2] == ["agent", "get"] and len(args) == 3:
     agent = find(state["agents"], args[2])
     reply({"agent": agent}) if agent else fail("agent_not_found")
-elif args[:2] == ["agent", "rename"] and len(args) == 4:
-    with open(path + ".lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        state = json.load(open(path))
-        agent, name = find(state["agents"], args[2]), args[3]
-        if agent is None:
-            fail("agent_not_found")
-        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name):
-            fail("invalid_agent_name")
-        if name in state.get("taken", []) or any(a is not agent and a.get("name") == name for a in state["agents"]):
-            fail("agent_name_taken")
-        agent["name"] = name
-        json.dump(state, open(path, "w"))
-        reply({"agent": agent})
 else:
     fail("unknown_command")
 '''
@@ -74,10 +57,6 @@ def fake_herdr(agents=(), workspaces=(), **more):
 def herdr_calls():
     log = FAKE_DIR / "calls.log"
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
-
-
-def herdr_names():
-    return {a["pane_id"]: a.get("name") for a in json.loads((FAKE_DIR / "state.json").read_text())["agents"]}
 
 
 fake_herdr()
@@ -123,12 +102,11 @@ class Hook(unittest.TestCase):
 
     def run_hook(self, events, statuses=(), agents=(), workspaces=(), keep_herdr=False):
         """The hook for each event in turn, with the stand-in herdr holding `agents` (or as it is, `keep_herdr`);
-        returns what it told Vux's agents. Naming watchers it would start are recorded in self.watching, not started."""
-        sent, self.watching = [], []
+        returns what it told Vux's agents."""
+        sent = []
         if not keep_herdr:
             fake_herdr(agents, workspaces)
-        original = (desk_alert.post, desk_alert.state_dir, desk_alert.config_for, desk_alert.running_agent,
-                    desk_alert.name_detached)
+        original = desk_alert.post, desk_alert.state_dir, desk_alert.config_for, desk_alert.running_agent
         try:
             with tempfile.TemporaryDirectory() as folder:
                 state = Path(folder)
@@ -139,13 +117,11 @@ class Hook(unittest.TestCase):
                 desk_alert.post = lambda url, key, body, timeout: sent.append((url, body))
                 # An agent back at work or done at the desk isn't away news here.
                 desk_alert.running_agent = lambda pane: None
-                desk_alert.name_detached = lambda state, pane: self.watching.append(pane)
                 for data in events:
                     os.environ["HERDR_PLUGIN_EVENT_JSON"] = json.dumps({"data": data})
                     desk_alert.main()
         finally:
-            (desk_alert.post, desk_alert.state_dir, desk_alert.config_for, desk_alert.running_agent,
-             desk_alert.name_detached) = original
+            desk_alert.post, desk_alert.state_dir, desk_alert.config_for, desk_alert.running_agent = original
             os.environ.pop("HERDR_PLUGIN_EVENT_JSON", None)
         return sent
 
@@ -491,8 +467,9 @@ class Realert(unittest.TestCase):
 
 class Marks(unittest.TestCase):
     def mark(self, home, agent):
+        # The stand-in first on PATH: `mark` needs no herdr, and mustn't reach the machine's.
         subprocess.run([sys.executable, "scripts/vux_state.py", "mark", agent], cwd=SKILL.parent, check=True,
-                       env={"HOME": str(home), "PATH": os.environ["PATH"]}, capture_output=True, timeout=30)
+                       env={"HOME": str(home), "PATH": f"{FAKE_DIR}:/usr/bin:/bin"}, capture_output=True, timeout=30)
 
     def test_marks_like_the_skill(self):
         # The skill marks an agent with `vux_state.py mark`, and this plugin finds the mark where it looks.
@@ -520,157 +497,45 @@ def desk_agent(pane, title, status="idle", kind="claude", **more):
             "terminal_title_stripped": title, "cwd": "/u/me/hark", **more}
 
 
-class Naming(Hook):
-    """Every agent gets a herdr agent name, once: herdr-voice names one it starts by voice; this plugin names one started
-    at the desk from its first task, with the skill's rule, and never renames an agent with a name."""
+class OnlyReads(unittest.TestCase):
+    """The plugin reports what herdr has and changes none of it: names and labels are the user's (`herdr agent
+    rename`, `herdr pane rename`) and other plugins' (herdr.auto-title)."""
 
-    def renames(self):
-        return [call[2:] for call in herdr_calls() if call[:2] == ["agent", "rename"]]
-
-    def test_a_desk_agent_is_named_from_its_first_task_once(self):
-        agents = [desk_agent("w1:p1", "✳ Tesla Roadster physics simulation for the demo", "working")]
-        sent = self.run_hook([self.status("w1:p1", "working")], agents=agents)
-        self.assertEqual(self.renames(), [["w1:p1", "tesla-roadster-physics"]])
-        self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False})])
-        # Its next events, and a next task with a new title, leave the name as it is: it holds for the agent's life.
-        state = json.loads((FAKE_DIR / "state.json").read_text())
-        state["agents"][0]["terminal_title_stripped"] = "✳ Fix the flaky swipe test"
-        (FAKE_DIR / "state.json").write_text(json.dumps(state))
-        (FAKE_DIR / "calls.log").unlink()
-        self.run_hook(keep_herdr=True, events=[self.status("w1:p1", "done"), self.status("w1:p1", "working")])
-        self.assertEqual(self.renames(), [])
-        self.assertEqual(herdr_names(), {"w1:p1": "tesla-roadster-physics"})
-
-    def test_an_agent_with_a_name_is_never_renamed(self):
-        # The voice recipe's names (new-<pane> for an empty prompt too) and the user's own.
-        agents = [desk_agent("w1:p1", "Fixing the swipe test", "working", name="apple-models"),
-                  desk_agent("w1:p2", "PR opened", "done", name="new-w1-p2"),
-                  desk_agent("w1:p3", "Something", "idle", name="mine")]
-        self.run_hook([self.status(p, s) for p, s in (("w1:p1", "done"), ("w1:p2", "idle"), ("w1:p3", "working"))],
-                      agents=agents)
-        self.assertEqual(self.renames(), [])
-        self.assertEqual(herdr_names(), {"w1:p1": "apple-models", "w1:p2": "new-w1-p2", "w1:p3": "mine"})
-
-    def test_no_task_no_name(self):
-        # Before its first prompt the title names only the agent or its folder: it stays unnamed (new-<pane> to Vux),
-        # and a watcher names it once the title shows.
-        agents = [desk_agent("w1:p1", "✳ Claude Code", "working"), desk_agent("w1:p2", "π - hark", "idle", kind="omp"),
-                  desk_agent("w1:p3", "grok", "blocked", kind="grok")]
-        self.run_hook([self.status("w1:p1", "working"), self.status("w1:p2", "idle")], agents=agents)
-        self.assertEqual(self.renames(), [])
-        self.assertEqual(self.watching, ["w1:p1"])
-
-    def test_names_are_unique_among_herdrs_agents(self):
-        # herdr's names are unique among its live agents, in every workspace; one named since the list counts too.
-        agents = [desk_agent("w1:p1", "Fix the flaky test"), desk_agent("w2:p1", "Fix the flaky test"),
-                  desk_agent("w3:p1", "Anything", name="fix-flaky-test")]
-        fake_herdr(agents, taken=["fix-flaky-test-2"])
-        self.run_hook(keep_herdr=True, events=[self.status("w1:p1", "working")])
-        self.assertEqual(herdr_names(), {"w1:p1": "fix-flaky-test-3", "w2:p1": "fix-flaky-test-4", "w3:p1": "fix-flaky-test"})
-
-    def test_every_unnamed_agent_with_a_task_is_named_at_any_event(self):
-        # Agents already running when the plugin is installed, or titled after their last event, are named at the next
-        # event on the server, and Vux hears of each; one just detected waits (its title may still be its shell's).
-        agents = [desk_agent("w1:p1", "Carry out prop colliders | hark", "working", kind="codex"),
-                  desk_agent("w2:p4", "Recover Swiftfin Apple TV Jellyfin password - grok", kind="grok"),
-                  desk_agent("w2:p5", "blockshane@mac: ~/github.com/shanev/asterism")]
-        sent = self.run_hook([{"type": "pane_agent_detected", "pane_id": "w2:p5", "workspace_id": "w2", "agent": "claude"}],
-                             agents=agents)
-        self.assertEqual(herdr_names(), {"w1:p1": "carry-out-prop-colliders", "w2:p4": "recover-swiftfin-apple-tv",
-                                         "w2:p5": None})
-        self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False}),
-                                (CHANGED, {"context": "w2", "item": "w2:p4", "push": False}),
-                                (CHANGED, {"context": "w2", "item": "w2:p5", "push": False})])
-
-    def test_pane_labels_are_neither_read_nor_written(self):
-        # They're the user's and herdr.auto-title's ("4 · hark › Implement OAuth scopes"), rewritten as work changes.
-        agents = [desk_agent("w1:p1", "Implement OAuth scopes", "working", label="4 · hark › Implement OAuth scopes")]
-        self.run_hook([self.status("w1:p1", "working")], agents=agents)
-        self.assertEqual(herdr_names(), {"w1:p1": "implement-oauth-scopes"})
-        self.assertEqual([c for c in herdr_calls() if c[:1] in (["pane"], ["tab"])], [])
-
-    def test_two_hooks_at_once_name_an_agent_once(self):
-        # herdr runs a hook per event, several at the same moment: each lists the agents before either renames
-        # (the stand-in's list is slow), and only the first may name it.
-        fake_herdr([desk_agent("w1:p1", "Tesla Roadster physics simulation", "done")], list_delay=0.5)
+    def test_the_hook_never_names_an_agent_or_labels_a_pane(self):
+        # Desk agents with no herdr name, a task in their titles and a label on one: every event the plugin hooks, run
+        # as herdr runs it, leaves them as they are and only reads.
+        agents = [desk_agent("w1:p1", "Tesla Roadster physics simulation", "working"),
+                  desk_agent("w1:p2", "grok", "working", kind="grok", label="grok: dynamics (#30)")]
+        fake_herdr(agents, [{"workspace_id": "w1", "label": "hark"}])
+        events = [{"type": "pane_agent_detected", "pane_id": "w1:p1", "workspace_id": "w1", "agent": "claude"},
+                  {"type": "pane_agent_status_changed", "pane_id": "w1:p1", "agent_status": "working", "workspace_id": "w1"},
+                  {"type": "pane_agent_status_changed", "pane_id": "w1:p1", "agent_status": "done", "workspace_id": "w1"},
+                  {"type": "pane_agent_status_changed", "pane_id": "w1:p2", "agent_status": "working", "workspace_id": "w1"},
+                  {"type": "pane_agent_status_changed", "pane_id": "w1:p2", "agent_status": "blocked", "workspace_id": "w1"},
+                  {"type": "pane_agent_status_changed", "pane_id": "w1:p2", "agent_status": "working", "workspace_id": "w1"},
+                  {"type": "workspace_renamed", "workspace_id": "w1", "label": "hark"},
+                  {"type": "pane_closed", "pane_id": "w1:p2", "workspace_id": "w1"}]
         with tempfile.TemporaryDirectory() as folder:
-            hooks = []
-            for status in ("done", "idle", "working"):
-                event = {"data": {"type": "pane_agent_status_changed", "pane_id": "w1:p1", "agent_status": status,
-                                  "workspace_id": "w1"}}
-                env = {"PATH": os.environ["PATH"], "HOME": folder, "HERDR_BIN_PATH": str(FAKE_DIR / "herdr"),
+            for event in events:
+                env = {"PATH": f"{FAKE_DIR}:/usr/bin:/bin", "HOME": folder, "HERDR_BIN_PATH": str(FAKE_DIR / "herdr"),
                        "HERDR_PLUGIN_STATE_DIR": folder, "HERDR_PLUGIN_CONFIG_DIR": folder,
-                       "HERDR_PLUGIN_EVENT_JSON": json.dumps(event)}
-                hooks.append(subprocess.Popen([sys.executable, str(PLUGIN / "desk_alert.py")], env=env,
-                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-            for hook in hooks:
-                hook.wait(timeout=30)
-        self.assertEqual(self.renames(), [["w1:p1", "tesla-roadster-physics"]])
+                       "HERDR_PLUGIN_EVENT_JSON": json.dumps({"data": event})}
+                done = subprocess.run([sys.executable, str(PLUGIN / "desk_alert.py")], env=env, capture_output=True,
+                                      text=True, timeout=30)
+                self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads((FAKE_DIR / "state.json").read_text())["agents"], agents)
+        self.assertTrue(all(call[:2] in (["agent", "get"], ["agent", "list"], ["pane", "list"], ["workspace", "list"])
+                            for call in herdr_calls()), herdr_calls())
 
-    def test_the_watcher_names_the_agent_once_its_title_shows(self):
-        fake_herdr([desk_agent("w1:p1", "✳ Claude Code", "working")])
-        sent, naps = [], []
-
-        def nap(seconds):
-            # Claude titles its terminal a moment after the prompt.
-            naps.append(seconds)
-            if len(naps) == 2:
-                state = json.loads((FAKE_DIR / "state.json").read_text())
-                state["agents"][0]["terminal_title_stripped"] = "✳ Newly added models tweet"
-                (FAKE_DIR / "state.json").write_text(json.dumps(state))
-
-        original = desk_alert.post
-        try:
-            desk_alert.post = lambda url, key, body, timeout: sent.append((url, body))
-            with tempfile.TemporaryDirectory() as folder:
-                desk_alert.name_when_titled(Path(folder), {"agents": [{"key": "k", "url": "http://hermes"}]}, "w1:p1",
-                                            sleep=nap)
-        finally:
-            desk_alert.post = original
-        # Looked twice: untitled, then titled and named; then it's done.
-        self.assertEqual(naps, [desk_alert.NAME_EVERY_SECONDS] * 2)
-        self.assertEqual(herdr_names(), {"w1:p1": "newly-added-models-tweet"})
-        self.assertEqual(sent, [(CHANGED, {"context": "w1", "item": "w1:p1", "push": False})])
-
-    def test_herdr_failing_names_nothing_and_alerts_go_on(self):
-        (FAKE_DIR / "state.json").unlink(missing_ok=True)
+    def test_the_plugin_has_no_naming_mode(self):
+        # `desk_alert.py name <pane>` was the detached watcher that named an agent once its title showed.
         with tempfile.TemporaryDirectory() as folder:
-            self.assertEqual(desk_alert.name_agents(Path(folder)), ([], []))
-
-    def test_the_rule_is_the_skills(self):
-        # One rule for the agents the skill names by voice and the ones this plugin names: the skill's own file.
-        self.assertEqual(Path(desk_alert.agent_names.__file__).resolve(),
-                         (SKILL.parent / "scripts" / "agent_names.py").resolve())
-
-
-class Slugs(unittest.TestCase):
-    """The names the rule makes of real tasks (titles from a desk), by herdr's rules for names."""
-
-    def test_short_kebab_case_from_the_task(self):
-        names = desk_alert.agent_names
-        for title, kind, name in [
-            ("Tesla Roadster physics simulation", "claude", "tesla-roadster-physics"),
-            ("Starship 15 simulation on simkit", "claude", "starship-15-simulation"),
-            ("CLIP: Improve MOLLE clip design", "omp", "clip-improve-molle-clip"),
-            ("Check today's cybersecurity issues", "codex", "check-todays-cybersecurity"),
-            ("Café menu redesign", "claude", "cafe-menu-redesign"),
-            # A name starts with a letter: a task that starts with a digit gets the kind first.
-            ("1Password service account for modelrelay secrets", "claude", "claude-1password-service"),
-            ("2026 roadmap", "omp", "omp-2026-roadmap"),
-            ("Supercalifragilisticexpialidocious-and-then-some words", "claude", "supercalifragilisticexpialid"),
-        ]:
-            got = names.slug(title, kind)
-            self.assertEqual(got, name, title)
-            self.assertRegex(got, r"^[a-z][a-z0-9_-]{0,31}$")
-            self.assertLessEqual(len(names.unique(got, {got, *(f"{got}-{n}" for n in range(2, 100))})), 32)
-        self.assertIsNone(names.slug("修复登录", "claude"))
-
-    def test_an_untitled_agent_has_no_name_yet(self):
-        names = desk_alert.agent_names
-        self.assertIsNone(names.name_for(desk_agent("w1P:p8", "Claude Code"), set()))
-        self.assertEqual(names.name(desk_agent("w1P:p8", "Claude Code")), "new-w1p-p8")
-        # A task with no letters to name it by: the placeholder, given for good.
-        self.assertEqual(names.name_for(desk_agent("w1P:p8", "修复登录"), set()), "new-w1p-p8")
+            fake_herdr([desk_agent("w1:p1", "Tesla Roadster physics simulation", "working")])
+            env = {"PATH": f"{FAKE_DIR}:/usr/bin:/bin", "HOME": folder, "HERDR_BIN_PATH": str(FAKE_DIR / "herdr"),
+                   "HERDR_PLUGIN_STATE_DIR": folder, "HERDR_PLUGIN_CONFIG_DIR": folder}
+            subprocess.run([sys.executable, str(PLUGIN / "desk_alert.py"), "name", "w1:p1"], env=env, capture_output=True,
+                           timeout=30)
+        self.assertEqual(herdr_calls(), [])
 
 
 if __name__ == "__main__":

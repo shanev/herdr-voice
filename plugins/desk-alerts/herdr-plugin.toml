@@ -1,8 +1,8 @@
 id = "herdr-voice.desk-alerts"
 name = "Desk alerts"
-version = "0.6.0"
+version = "0.7.0"
 min_herdr_version = "0.9.3"
-description = "Tell Vux when agents and workspaces change, push when an agent finishes or stops on a question while you're away, and name desk agents for their first task."
+description = "Tell Vux when agents and workspaces change, and push when an agent finishes or stops on a question while you're away."
 platforms = ["macos", "linux"]
 
 [[events]]

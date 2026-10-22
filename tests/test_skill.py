@@ -124,7 +124,7 @@ class Recipes(unittest.TestCase):
         # Voice users address agents by what they're doing ("apple-models"), not by tab number.
         self.assertIn("herdr agent start <name>", TEXT)
         self.assertNotIn("--clear", TEXT)
-        # new-<pane> is only the fallback when the request gives no usable phrase.
+        # herdr's start takes a name: new-<pane> only when the request gives no usable phrase.
         self.assertIn("new-<pane>", TEXT)
 
     def test_workspace_comes_from_the_script(self):
@@ -183,14 +183,16 @@ class Recipes(unittest.TestCase):
         for needle in ("agent_session", "~/.claude/projects/", "grep -l", "named as in **What's running**", "read-only"):
             self.assertIn(needle, section)
 
-    def test_names_agents_by_name_never_by_label_or_pane_id(self):
-        # Every agent has a herdr agent name, once (Vux shows the same); pane and tab labels are the user's and Auto
-        # Title's, rewritten as the work changes, so they're never names, and the skill never writes them.
+    def test_reports_herdrs_names_and_labels_as_they_are(self):
+        # Names and labels are herdr's, set by the user or plugins such as Auto Title; the skill reports them as herdr
+        # has them, the same for every agent kind, and writes neither unless the user asks.
         section = TEXT.split("**What's running:**")[1].split("\n**")[0]
-        for needle in ("by its `name`", "`new-<pane>`", "`scripts/agent_names.py`", "`terminal_title_stripped`",
-                       "Pane and tab labels aren't names", "never rename a pane or tab", "Never say a `pane_id` to the user"):
+        for needle in ("by its `name`", "`label` from `herdr pane list`", "`terminal_title_stripped`",
+                       "the same for every agent kind", "unless the user asks", "Never say a `pane_id` to the user"):
             self.assertIn(needle, section)
-        for stale in ("pane's label", "herdr pane rename", "herdr tab rename", "a `label` counts"):
+        for stale in ("new-<pane>", "agent_names.py", "Pane and tab labels aren't names", "decoration", "π >", "- grok"):
+            self.assertNotIn(stale, section)
+        for stale in ("herdr pane rename", "herdr tab rename", "desk-alerts plugin names", "named from its first task"):
             self.assertNotIn(stale, TEXT)
 
     def test_voice_vocabulary_maps_to_recipes(self):

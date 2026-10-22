@@ -18,23 +18,21 @@ name, else one labelled with the name; on the given machine if it isn't this one
 `<machine>/<workspace id>`). Prints {"context": {...}}.
 
 items: the agents in a workspace, or in every workspace each with its "context", as {"items": [...]}, in the item
-format version 2 that SKILL.md declares (metadata.hark.items.version). Every item has all of these, each with one
-meaning:
+format version 2 that SKILL.md declares (metadata.hark.items.version). Every field is herdr's own, as herdr has it,
+the same for every agent kind:
   id     the agent's herdr pane id.
-  name   its herdr agent name: the handle the user, the skill and Vux use, unique among herdr's live agents and
-         stable for the agent's life. One started by voice is named from the request; the desk-alerts plugin names
-         one started at the desk once, from its first task. Until then it's `new-<pane>` (pane id lowercased, `:` as
-         `-`). See agent_names.py.
-  kind   the agent kind as people write it: Claude, Codex, omp, Grok.
-  task   what it's doing now, from the title the agent gives its terminal without the agent's own chrome; "New
-         session" before it has a task.
+  name   its herdr agent name, else its pane id (herdr's agent commands take either).
+  kind   herdr's agent kind as herdr reports it (claude, codex, grok…), "agent" when herdr reports none.
+  task   what herdr shows for the pane: its pane label when it has one (`herdr pane list`), else its terminal title,
+         else "New session".
   state  herdr's status as working, waiting (blocked on a question), done or idle.
   card   for a blocked agent, a question card with its screen (Vux reads the question from it); for a done agent whose
          finish no one has told the user yet, a result card, with the start of its last reply (Claude Code and Codex,
          on this machine); else null. An agent herdr-voice handed off (its mark in ~/.cache/herdr-voice/handed-off)
          gets no result card: Hermes reports that one in the conversation.
-Pane and tab labels aren't read: they're the user's and other plugins' (herdr.auto-title rewrites them as the work
-changes), and herdr-voice never writes them.
+Names and labels are whoever set them: the user (`herdr agent rename`, `herdr pane rename`), the voice recipe's
+`herdr agent start <name>`, or a plugin such as herdr.auto-title, which labels panes for their work. This script
+reports them as they are and writes neither.
 
 realert: has the desk-alerts plugin alert again for a pane whose dialog moved on to another question, and clears the
 pane's hand-off mark (below), so the plugin reports the pane from then on.
@@ -54,11 +52,10 @@ import sys
 import time
 from pathlib import Path
 
-# last_reply.py and agent_names.py beside this script, however it's loaded, without writing bytecode beside them: Hermes
-# calls a new file in a skill's folder a local edit and won't update the skill over it.
+# last_reply.py beside this script, however it's loaded, without writing bytecode beside it: Hermes calls a new file in
+# a skill's folder a local edit and won't update the skill over it.
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_names import kind_name, name, task  # noqa: E402
 from last_reply import last_reply  # noqa: E402
 
 STATES = {"working": "working", "blocked": "waiting", "done": "done", "idle": "idle"}
@@ -66,6 +63,8 @@ HANDED_OFF = Path.home() / ".cache" / "herdr-voice" / "handed-off"
 HAND_OFF_TTL = 12 * 60 * 60
 # The start of a result Vux shows on the agent's row (its first line or two); Hear gets the whole of it.
 RESULT_TEXT = 300
+# The task of an agent whose pane herdr shows nothing for.
+NO_TASK = "New session"
 
 
 class HerdrError(Exception):
@@ -168,6 +167,18 @@ def create(name, machine=None):
                         "location": machine or this_machine()}}
 
 
+def plain(text):
+    """Text without icon-font glyphs (Nerd Fonts' private-use characters, which a phone can't show and speech would
+    read), spaces folded."""
+    kept = "".join(c for c in text or "" if not (0xE000 <= ord(c) <= 0xF8FF or ord(c) >= 0xF0000))
+    return " ".join(kept.split())
+
+
+def task(agent, label):
+    """What herdr shows for the agent's pane: its label, else its terminal title, else "New session"."""
+    return plain(label) or plain(agent.get("terminal_title_stripped") or agent.get("terminal_title")) or NO_TASK
+
+
 def screen_text(screen):
     """The screen without trailing spaces and blank lines, newest 6000 characters (as desk-alerts sends it)."""
     lines = [line.rstrip() for line in screen.splitlines()]
@@ -219,13 +230,15 @@ def agent_items(machine, workspace=None):
         agents = [a for a in agents if a.get("workspace_id") == workspace]
     if not agents:
         return []
-    labels = {w["workspace_id"]: w.get("label") for w in herdr_json("workspace", "list", machine=machine)["workspaces"]}
+    # Pane labels are on panes only (an agent's entry has none).
+    panes = herdr_json("pane", "list", *(["--workspace", workspace] if workspace is not None else []), machine=machine)
+    labels = {p["pane_id"]: p.get("label") for p in panes["panes"]}
     now = time.time()
     items = []
     for agent in agents:
         state = STATES.get(agent.get("agent_status"), "idle")
-        item = {"id": agent["pane_id"], "name": name(agent), "kind": kind_name(agent.get("agent")),
-                "task": task(agent, labels.get(agent.get("workspace_id"))), "state": state, "card": None}
+        item = {"id": agent["pane_id"], "name": agent.get("name") or agent["pane_id"], "kind": agent.get("agent") or "agent",
+                "task": task(agent, labels.get(agent["pane_id"])), "state": state, "card": None}
         if state == "waiting":
             try:
                 screen = screen_text(herdr("agent", "read", agent["pane_id"], "--source", "visible", machine=machine))

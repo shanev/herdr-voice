@@ -54,16 +54,16 @@ AGENTS = [
     {"agent": "claude", "agent_status": "done", "name": "handed", "pane_id": "w5M:p5", "tab_id": "w5M:t3",
      "workspace_id": "w5M", "terminal_title_stripped": "Tests pass", "completion_seq": 7},
 ]
-# Pane and tab labels as the user and herdr.auto-title set them ("4 · repo › Topic", rewritten as the work changes):
-# never an item's name or task, so the script never asks herdr for them.
+# Pane labels, as the user (`herdr pane rename`) or herdr.auto-title set them: what herdr shows for the pane, so the
+# item's task. herdr's agent list has no labels; only its pane list does.
 PANES = [
-    {"pane_id": "w5M:p1", "label": "1 · hark › Fixing the swipe test", "terminal_title_stripped": "Fixing the swipe test"},
+    {"pane_id": "w5M:p1", "label": None, "terminal_title_stripped": "Fixing the swipe test"},
     {"pane_id": "w5M:p2", "label": "reviewer", "terminal_title_stripped": "Bash prompt"},
     {"pane_id": "w5M:p3", "label": "2 · hark › PR opened", "terminal_title_stripped": "PR opened"},
-    {"pane_id": "w5M:p4", "label": "hud-stats › Hud stats agent"},
+    {"pane_id": "w5M:p4"},
+    {"pane_id": "w5M:p5", "label": ""},
+    {"pane_id": "w1P:p8", "label": None},
 ]
-TABS = [{"tab_id": "w5M:t1", "workspace_id": "w5M", "label": "1 · Fixing"}, {"tab_id": "w1P:t7", "workspace_id": "w1P", "label": "1 · x"},
-        {"tab_id": "w5M:t2", "workspace_id": "w5M", "label": "2 · PR"}, {"tab_id": "w5M:t3", "workspace_id": "w5M", "label": "mine"}]
 # The item format, version 2: every key on every item, each with one type.
 ITEM_TYPES = {"id": str, "name": str, "kind": str, "task": str, "state": str, "card": (dict, type(None))}
 WORKSPACES = [{"workspace_id": "w1P", "label": "asterism"}, {"workspace_id": "w5M", "label": "hark"}, {"workspace_id": "w9"},
@@ -90,9 +90,8 @@ class VuxState(unittest.TestCase):
                 {"id": "bbbb", "label": "gone", "enabled": True}]),
             "vega@vega|workspace list": result({"workspaces": [{"workspace_id": "w2", "label": "hark"}]}),
             "|agent list": result({"agents": AGENTS}),
-            # There for a script that would read labels; this one mustn't ask.
             "|pane list": result({"panes": PANES}),
-            "|tab list": result({"tabs": TABS}),
+            "|pane list --workspace w5M": result({"panes": [p for p in PANES if p["pane_id"].startswith("w5M:")]}),
             "|agent read w5M:p2 --source visible": SCREEN,
             "vega@vega|agent list": result({"agents": [{"agent": "claude", "agent_status": "working", "pane_id": "w2:p1",
                                                         "tab_id": "w2:t1", "workspace_id": "w2", "terminal_title_stripped": "Port"}]}),
@@ -143,20 +142,23 @@ class VuxState(unittest.TestCase):
         items = self.run_state("items", "w5M")["items"]
         question = hashlib.sha256(SCREEN_TEXT.encode()).hexdigest()[:16]
         self.assertEqual(items, [
-            # Its herdr agent name, the handle; its kind, and what it's on from its terminal title.
-            {"id": "w5M:p1", "name": "apple-models", "kind": "Claude", "task": "Fixing the swipe test", "state": "working",
+            # Its herdr agent name and kind as herdr has them; no label, so its task is its terminal title.
+            {"id": "w5M:p1", "name": "apple-models", "kind": "claude", "task": "Fixing the swipe test", "state": "working",
              "card": None},
-            # No herdr name yet: new-<pane>, never its pane's label ("reviewer"); the question read from its screen.
-            {"id": "w5M:p2", "name": "new-w5m-p2", "kind": "Codex", "task": "Bash prompt", "state": "waiting",
+            # No herdr name: its pane id, herdr's other handle for it. Its pane's label is its task.
+            {"id": "w5M:p2", "name": "w5M:p2", "kind": "codex", "task": "reviewer", "state": "waiting",
              "card": {"kind": "question", "id": question, "screen": SCREEN_TEXT}},
-            # Done with a result the user hasn't heard.
-            {"id": "w5M:p3", "name": "new-w5m-p3", "kind": "Claude", "task": "PR opened", "state": "done",
+            # Done with a result the user hasn't heard; labelled by herdr.auto-title, which herdr shows, so its task.
+            {"id": "w5M:p3", "name": "w5M:p3", "kind": "claude", "task": "2 · hark › PR opened", "state": "done",
              "card": {"kind": "result", "id": "w5M:p3:42", "text": RESULT_TEXT}},
-            # No task yet (its title only names its folder).
-            {"id": "w5M:p4", "name": "new-w5m-p4", "kind": "omp", "task": "New session", "state": "idle", "card": None},
+            # Its terminal title as herdr has it (an icon glyph dropped), nothing taken off for its kind.
+            {"id": "w5M:p4", "name": "w5M:p4", "kind": "omp", "task": "π > hark", "state": "idle", "card": None},
             # Handed off by herdr-voice: Hermes tells its result in the conversation, so no card.
-            {"id": "w5M:p5", "name": "handed", "kind": "Claude", "task": "Tests pass", "state": "done", "card": None},
+            {"id": "w5M:p5", "name": "handed", "kind": "claude", "task": "Tests pass", "state": "done", "card": None},
         ])
+        # One pane list, for the workspace, beside the agent list; nothing that writes.
+        self.assertEqual([c["args"] for c in self.calls() if c["args"][:1] == ["pane"]], [["pane", "list", "--workspace", "w5M"]])
+        self.assertFalse([c for c in self.calls() if c["args"][1:2] in (["rename"], ["start"], ["close"])])
 
     def test_items_have_exactly_the_version_2_keys(self):
         for item in self.run_state("items")["items"]:
@@ -169,30 +171,66 @@ class VuxState(unittest.TestCase):
         for item in self.run_state("items", "w5M")["items"]:
             self.assertEqual(set(item), set(ITEM_TYPES), item)
 
-    def test_a_pane_label_is_never_a_name_or_task(self):
-        # herdr.auto-title renames every pane on its first start and rewrites labels as the work changes; a label
-        # that became a name would drift (on a real desk: "hud-stats › Hud stats agent"). Labels aren't even read.
+    def test_task_is_the_panes_label_else_its_title(self):
+        # Two Grok panes the user labelled by hand in herdr: Grok titles its terminal just "grok", and herdr shows the
+        # labels. Vux showed both as "New session" while it read titles only.
+        self.answers["|agent list"] = result({"agents": [
+            {"agent": "grok", "agent_status": "blocked", "pane_id": "w1P:p2H", "workspace_id": "w1P",
+             "terminal_title": "grok", "terminal_title_stripped": "grok"},
+            {"agent": "grok", "agent_status": "blocked", "pane_id": "w1P:p2F", "workspace_id": "w1P",
+             "terminal_title": "grok", "terminal_title_stripped": "grok"},
+            # No label: herdr's title, the stripped one when herdr has it, else the raw one.
+            {"agent": "claude", "agent_status": "idle", "pane_id": "w1P:p3", "workspace_id": "w1P",
+             "terminal_title": "✳ Phase 8 design pass", "terminal_title_stripped": "Phase 8 design pass"},
+            {"agent": "claude", "agent_status": "idle", "pane_id": "w1P:p4", "workspace_id": "w1P",
+             "terminal_title": "Raw  title only"},
+            # Neither: "New session".
+            {"agent": "claude", "agent_status": "idle", "pane_id": "w1P:p5", "workspace_id": "w1P",
+             "terminal_title": None, "terminal_title_stripped": "  "},
+        ]})
+        self.answers["|pane list"] = result({"panes": [
+            {"pane_id": "w1P:p2H", "label": "grok: dynamics (#30)", "terminal_title_stripped": "grok"},
+            {"pane_id": "w1P:p2F", "label": "grok: raptor (#13)", "terminal_title_stripped": "grok"},
+            {"pane_id": "w1P:p3", "label": None}, {"pane_id": "w1P:p4"}, {"pane_id": "w1P:p5", "label": " "}]})
+        self.answers["|agent read w1P:p2H --source visible"] = SCREEN
+        self.answers["|agent read w1P:p2F --source visible"] = SCREEN
         items = self.run_state("items")["items"]
-        labels = {p["label"] for p in PANES if p.get("label")}
-        for item in items:
-            self.assertNotIn(item["name"], labels)
-            self.assertNotIn(item["task"], labels)
-            self.assertNotIn("›", item["name"] + item["task"])
-        self.assertEqual([c for c in self.calls() if c["args"][:1] in (["pane"], ["tab"])], [])
+        self.assertEqual([(i["id"], i["name"], i["task"]) for i in items], [
+            ("w1P:p2H", "w1P:p2H", "grok: dynamics (#30)"),
+            ("w1P:p2F", "w1P:p2F", "grok: raptor (#13)"),
+            ("w1P:p3", "w1P:p3", "Phase 8 design pass"),
+            ("w1P:p4", "w1P:p4", "Raw title only"),
+            ("w1P:p5", "w1P:p5", "New session"),
+        ])
+        # The label wins whatever the title says, and follows it when it changes.
+        self.answers["|pane list"] = result({"panes": [{"pane_id": "w1P:p3", "label": "Design pass, round two"}]})
+        item = next(i for i in self.run_state("items")["items"] if i["id"] == "w1P:p3")
+        self.assertEqual(item["task"], "Design pass, round two")
 
-    def test_an_unnamed_agent_is_new_pane_until_it_has_a_name(self):
-        # The voice recipe's rule for a session it starts with no task: the pane id lowercased, ":" as "-".
+    def test_herdr_fields_are_as_herdr_has_them_for_every_kind(self):
+        # Nothing per agent kind: the kind is herdr's string, and every title is herdr's, decorations and all.
+        agents = [("claude", "Tesla Roadster physics simulation"), ("omp", "π > CLIP: Improve MOLLE clip design"),
+                  ("grok", "Southern Loop Trip: Tampa - grok"), ("codex", "Check today's issues | cozy"),
+                  ("qodercli", "Claude Code"), (None, "blockshane")]
+        self.answers["|agent list"] = result({"agents": [
+            {"agent": kind, "agent_status": "idle", "pane_id": f"w1P:p{n}", "workspace_id": "w1P",
+             "terminal_title_stripped": title, "cwd": "/u/me/cozy"} for n, (kind, title) in enumerate(agents)]})
+        items = self.run_state("items")["items"]
+        self.assertEqual([(i["kind"], i["task"]) for i in items],
+                         [(kind or "agent", title) for kind, title in agents])
+
+    def test_an_unnamed_agent_is_its_pane_id(self):
+        # herdr's own handle for an agent without a name: its agent commands take it as a target.
         self.agents[0].pop("name")
         self.agents[4]["name"] = None
         items = {i["id"]: i for i in self.run_state("items")["items"]}
-        self.assertEqual(items["w5M:p1"]["name"], "new-w5m-p1")
-        self.assertEqual(items["w1P:p8"]["name"], "new-w1p-p8")
-        self.assertEqual((items["w1P:p8"]["task"], items["w5M:p4"]["task"]), ("New session", "New session"))
-        # Once herdr has its name (the desk-alerts plugin gave it, or the user), that's the name, whatever the task.
+        self.assertEqual(items["w5M:p1"]["name"], "w5M:p1")
+        self.assertEqual(items["w1P:p8"]["name"], "w1P:p8")
+        self.assertEqual(items["w1P:p8"]["task"], "New session")
+        # Once herdr has a name for it (the user's, or the voice recipe's `herdr agent start <name>`), that's the name.
         self.agents[0]["name"] = "swipe-test"
-        self.agents[0]["terminal_title_stripped"] = "Something else entirely"
         item = next(i for i in self.run_state("items", "w5M")["items"] if i["id"] == "w5M:p1")
-        self.assertEqual((item["name"], item["task"]), ("swipe-test", "Something else entirely"))
+        self.assertEqual(item["name"], "swipe-test")
 
     def test_running_leaves_the_skills_folder_as_installed(self):
         # Hermes calls a changed file in a skill's folder a local edit and won't update the skill over it.
@@ -206,6 +244,7 @@ class VuxState(unittest.TestCase):
         self.assertEqual([(i["context"], i["id"]) for i in items], [
             ("w5M", "w5M:p1"), ("w5M", "w5M:p2"), ("w5M", "w5M:p3"), ("w5M", "w5M:p4"), ("w1P", "w1P:p8"), ("w5M", "w5M:p5")])
         self.assertEqual(next(i for i in items if i["id"] == "w1P:p8")["state"], "idle")
+        self.assertEqual([c["args"] for c in self.calls() if c["args"][:1] == ["pane"]], [["pane", "list"]])
         self.assertEqual([c for c in self.calls() if c["machine"] or c["args"][:1] == ["machine"]], [])
 
     def test_create_finds_the_repo_and_opens_its_workspace_without_focus(self):
@@ -278,61 +317,21 @@ class VuxState(unittest.TestCase):
         item = next(i for i in self.run_state("items", "w5M")["items"] if i["id"] == "w5M:p3")
         self.assertIsNone(item["card"])
 
-    def test_task_is_the_title_without_the_agents_chrome(self):
-        # Titles as Claude Code, omp, Grok and Codex set them (seen on a desk), and the task Vux shows for each, whole
-        # (Vux fits it to the row).
-        agents = [
-            ("claude", "Tesla Roadster physics simulation", "/u/shanev/asterism"),
-            ("claude", "1Password service account for modelrelay secrets", "/u/me"),
-            ("omp", "π > \U000f03e2 CLIP: Improve MOLLE clip design", "/u/shanev/cybertruck"),
-            ("grok", "Southern Loop Trip: Tampa Over Ohio and Myrtle Beach - grok", "/u/shanev/obsidian"),
-            ("codex", "Check today's cybersecurity issues | cozy", "/u/tensor-systems/cozy"),
-            ("codex", "⠹ Run curl header command | desk-alert-zZma", "/tmp/desk-alert-zZma"),
-            # Before its first prompt: the title names only the agent, or its folder.
-            ("claude", "Claude Code", "/u/shanev/asterism"),
-            ("omp", "π - cybertruck", "/u/shanev/cybertruck"),
-            ("grok", "grok", "/u/shanev/simkit"),
-        ]
-        self.answers["|agent list"] = result({"agents": [
-            {"agent": kind, "agent_status": "idle", "pane_id": f"w1P:p{n}", "tab_id": f"w1P:t{n}", "workspace_id": "w1P",
-             "terminal_title_stripped": title, "cwd": cwd} for n, (kind, title, cwd) in enumerate(agents)]})
-        items = self.run_state("items", "w1P")["items"]
-        self.assertEqual([(i["kind"], i["task"]) for i in items], [
-            ("Claude", "Tesla Roadster physics simulation"),
-            ("Claude", "1Password service account for modelrelay secrets"),
-            ("omp", "CLIP: Improve MOLLE clip design"),
-            ("Grok", "Southern Loop Trip: Tampa Over Ohio and Myrtle Beach"),
-            ("Codex", "Check today's cybersecurity issues"),
-            ("Codex", "Run curl header command"),
-            ("Claude", "New session"),
-            ("omp", "New session"),
-            ("Grok", "New session"),
-        ])
-        self.assertEqual([i["name"] for i in items], [f"new-w1p-p{n}" for n in range(len(agents))])
-
-    def test_a_working_agents_task_holds(self):
-        # Claude's spinner and omp's status icon redraw the title many times a second; the task mustn't move with them.
-        tasks = []
-        for claude, omp in [("✳ Newly added models tweet", "π > \U000f03e2 SKY: Explain why the sky is blue"),
-                            ("◑ Newly added models tweet", "π > \U000f0547 SKY: Explain why the sky is blue"),
-                            ("⠋ Newly added models tweet", "π > SKY: Explain why the sky is blue")]:
-            self.answers["|agent list"] = result({"agents": [
-                {"agent": "claude", "agent_status": "working", "pane_id": "wC3:p2", "tab_id": "wC3:t2", "workspace_id": "wC3",
-                 "terminal_title_stripped": claude},
-                {"agent": "omp", "agent_status": "working", "pane_id": "wC3:p3", "tab_id": "wC3:t2", "workspace_id": "wC3",
-                 "name": "sky", "terminal_title_stripped": omp}]})
-            tasks.append([(i["name"], i["task"]) for i in self.run_state("items", "wC3")["items"]])
-        self.assertEqual(tasks, [[("new-wc3-p2", "Newly added models tweet"), ("sky", "SKY: Explain why the sky is blue")]] * 3)
-
     def test_icon_font_glyphs_are_dropped(self):
-        # Nerd Font icons (private use) have no glyph on the phone, and speech would read them.
+        # Nerd Font icons (private use) have no glyph on the phone, and speech would read them; nothing else goes.
         self.answers["|agent list"] = result({"agents": [
             {"agent": "omp", "agent_status": "working", "pane_id": "w7F:p1", "tab_id": "w7F:t1", "workspace_id": "w7F",
              "name": "clip", "terminal_title_stripped": "π > \U000f03e2 CLIP: Improve MOLLE clip design \ue0b0"}]})
+        self.answers["|pane list --workspace w7F"] = result({"panes": [{"pane_id": "w7F:p1", "label": None}]})
         [item] = self.run_state("items", "w7F")["items"]
-        self.assertEqual((item["name"], item["kind"], item["task"]), ("clip", "omp", "CLIP: Improve MOLLE clip design"))
+        self.assertEqual((item["name"], item["kind"], item["task"]), ("clip", "omp", "π > CLIP: Improve MOLLE clip design"))
 
     def test_herdr_failing_is_an_error_not_an_empty_list(self):
+        # Without its pane list there are no labels: an error, never items with the wrong task.
+        del self.answers["|pane list --workspace w5M"]
+        failed = self.run_state("items", "w5M", check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("pane list", failed.stderr)
         del self.answers["|agent list"]
         failed = self.run_state("items", "w5M", check=False)
         self.assertNotEqual(failed.returncode, 0)
