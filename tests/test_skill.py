@@ -63,8 +63,8 @@ class Frontmatter(unittest.TestCase):
         self.assertEqual(list(frontmatter()["metadata"]), ["hark"])
         vux = frontmatter()["metadata"]["hark"]
         self.assertIs(vux["voice"], True)
-        # The name the app shows for the skill, in place of its folder's.
-        self.assertEqual(vux["title"], "Herdr")
+        # The name the app shows for the skill, in place of its folder's: herdr-core-voice, for the Herdr app, is "Herdr".
+        self.assertEqual(vux["title"], "Herdr (classic)")
         self.assertLessEqual(len(vux["summary"]), 120)
         self.assertEqual(vux["requires"]["command"], "herdr")
         # Hand-offs need delegate_task, and the permission and merge choices need memory

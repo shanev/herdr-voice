@@ -4,7 +4,7 @@ description: "Claude Code, Codex, omp, any coding agent: Herdr, not tmux"
 metadata:
   hark:
     voice: true
-    title: Herdr
+    title: "Herdr (classic)"
     summary: "Start, check and steer Claude Code, Codex and other coding agents in Herdr."
     requires:
       command: herdr
