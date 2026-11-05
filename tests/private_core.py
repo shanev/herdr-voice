@@ -1,9 +1,15 @@
 """A private herdr-core (`hc`) for the herdr-core-voice tests: its own session, socket and state, started with a clean
 environment as a desktop start would be, so nothing touches the user's own core. The tests talk to it as the skill's
-scripts do, over its socket."""
+scripts do, over its socket.
+
+A core is stopped when its test class is done, failed or not, and at the latest when the test run ends, interrupted
+(Ctrl-C, or SIGTERM from a timeout) included; the run then checks that none of its cores is left, and fails if one
+was."""
+import atexit
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -26,8 +32,41 @@ def hc_binary():
     return found
 
 
+# The cores this run started and hasn't stopped yet, by their core process.
+RUNNING = {}
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def gone(pid, timeout=10):
+    """Waits for a process that isn't ours to exit (`hc server stop` answers just before its core does): on the
+    process's exit event, kqueue's on macOS, a pidfd on Linux. False if it's still there after `timeout` seconds."""
+    import select
+    try:
+        if hasattr(os, "pidfd_open"):
+            fd = os.pidfd_open(pid)
+            try:
+                return bool(select.select([fd], [], [], timeout)[0])
+            finally:
+                os.close(fd)
+        queue = select.kqueue()
+        try:
+            event = select.kevent(pid, select.KQ_FILTER_PROC, select.KQ_EV_ADD | select.KQ_EV_ONESHOT, select.KQ_NOTE_EXIT)
+            return bool(queue.control([event], 1, timeout))
+        finally:
+            queue.close()
+    except (ProcessLookupError, FileNotFoundError):
+        return True
+
+
 class PrivateCore:
-    def __init__(self):
+    def __init__(self, **env):
         self.hc = hc_binary()
         # macOS caps socket paths at 103 bytes: a short folder under /tmp.
         self.folder = Path(tempfile.mkdtemp(prefix="hcv", dir="/tmp")).resolve()
@@ -37,15 +76,27 @@ class PrivateCore:
                     "PATH": os.getenv("PATH") or "/usr/bin:/bin", "SHELL": os.getenv("SHELL") or "/bin/sh",
                     "LANG": os.getenv("LANG") or "en_US.UTF-8", "TERM": "xterm-256color",
                     "HC_SESSION": self.session, "HC_SOCKET": str(self.socket),
-                    "XDG_STATE_HOME": str(self.folder / "state"), "XDG_CONFIG_HOME": str(self.folder / "config")}
+                    "XDG_STATE_HOME": str(self.folder / "state"), "XDG_CONFIG_HOME": str(self.folder / "config"), **env}
+        self.pid = None
 
     def start(self):
-        subprocess.run([self.hc, "server", "start"], env=self.env, check=True, capture_output=True, timeout=60)
+        started = subprocess.run([self.hc, "server", "start"], env=self.env, check=True, capture_output=True, text=True,
+                                 timeout=60)
+        self.pid = json.loads(started.stdout)["pid"]
+        RUNNING[self.pid] = self
         return self
 
     def stop(self):
+        """Stops the core and checks it's gone (its terminals end with it)."""
+        if self.pid is None:
+            return
         subprocess.run([self.hc, "server", "stop"], env=self.env, capture_output=True, timeout=60)
+        pid, self.pid = self.pid, None
+        RUNNING.pop(pid, None)
         shutil.rmtree(self.folder, ignore_errors=True)
+        if not gone(pid):
+            os.kill(pid, signal.SIGKILL)
+            raise AssertionError(f"`hc server stop` left the test core {pid} running: killed it")
 
     def connect(self):
         connection = socket.socket(socket.AF_UNIX)
@@ -142,3 +193,30 @@ def space_doc(*spaces):
         {"id": f"tb-{space_id}-{n}", "name": tab_name, "root": {"id": f"tb-{space_id}-{n}", "type": "row", "children": [
             {"id": f"p-{terminal}", "type": "block", "content": {"terminal": terminal}} for terminal in terminals]}}
         for n, (tab_name, terminals) in enumerate(tabs)]} for space_id, name, folder, tabs in spaces]}
+
+
+def _stop_left_over():
+    """At the end of the run: stops any core a test class didn't, and fails the run if there was one."""
+    left = list(RUNNING.values())
+    for core in left:
+        try:
+            core.stop()
+        except AssertionError as error:
+            print(error, file=sys.stderr)
+    if left:
+        print(f"private_core: {len(left)} test core(s) were still running at the end of the run: stopped them",
+              file=sys.stderr)
+        os._exit(1)
+
+
+atexit.register(_stop_left_over)
+
+
+def _interrupted(*_):
+    # unittest takes SystemExit in a test for that test's error and goes on; KeyboardInterrupt ends the run.
+    raise KeyboardInterrupt
+
+
+# A timeout's SIGTERM ends the run as Ctrl-C does, then the check above stops what's left.
+if signal.getsignal(signal.SIGTERM) is signal.SIG_DFL:
+    signal.signal(signal.SIGTERM, _interrupted)

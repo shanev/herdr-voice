@@ -49,10 +49,7 @@ class VuxState(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.core = PrivateCore().start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.core.stop()
+        cls.addClassCleanup(cls.core.stop)
 
     def setUp(self):
         self.core.clear()
