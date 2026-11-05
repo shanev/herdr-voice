@@ -84,6 +84,9 @@ READER_KINDS = {"claude-code": "claude", "codex": "codex"}
 RESULT_TEXT = 300
 NO_TASK = "New session"
 NO_REPLY = 3
+# Claude Code reports `done` a moment (about 0.1 s) before its reply is in its transcript: for this long after a done
+# report, a reply not in the file yet is waited for.
+FLUSH_SECONDS = 2
 
 
 def this_machine():
@@ -334,10 +337,30 @@ def transcript(terminal, home):
     return path if path is not None and path.is_file() else None
 
 
+def finished_reply(terminal, home):
+    """The agent's last reply from its session file, None if there's none to read there. Just after the agent reported
+    `done` (FLUSH_SECONDS), a file that hasn't had its reply written yet is waited for: never longer, so a turn that
+    ended without a reply (interrupted) costs nothing later."""
+    agent = as_agent(terminal, home)
+    if agent is None:
+        return None
+    text = last_reply(agent, home)
+    reported = (terminal.get("status_ms") or 0) / 1000
+    if text is not None or (terminal.get("status") or {}).get("state") != "done":
+        return text
+    path = transcript(terminal, home)
+    while path is not None and time.time() < reported + FLUSH_SECONDS:
+        time.sleep(0.05)
+        if path.stat().st_mtime >= reported:
+            text = last_reply(agent, home)
+            if text is not None:
+                return text
+    return None
+
+
 def result_start(terminal):
-    agent = as_agent(terminal, Path.home())
     try:
-        reply = (last_reply(agent, Path.home()) or "").strip() if agent else ""
+        reply = (finished_reply(terminal, Path.home()) or "").strip()
     except (OSError, ValueError, KeyError, TypeError):
         return None
     if len(reply) <= RESULT_TEXT:
@@ -394,8 +417,7 @@ def realert(terminal):
 def reply(terminal):
     with core.Core() as connection:
         found = resolve(connection, terminal)
-    agent = as_agent(found, Path.home())
-    text = last_reply(agent, Path.home()) if agent else None
+    text = finished_reply(found, Path.home())
     if text is None:
         app = (found.get("status") or {}).get("app")
         print(f"No finished reply in a session file for this {kind_name(app) if app else 'terminal'}; read the screen.",

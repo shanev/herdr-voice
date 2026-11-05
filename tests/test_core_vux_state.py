@@ -187,6 +187,22 @@ class VuxState(unittest.TestCase):
         self.assertEqual(session, {"id": agent["address"], "name": agent["address"],
                                    "path": str(self.home / ".claude/projects/-repo/s-42.jsonl")})
 
+    def test_a_reply_written_just_after_done_is_read(self):
+        # Claude Code reports done about 0.1 s before its reply is in its transcript: read at once (the watcher's line,
+        # a hand-off's wait returning), the reply is waited for, not missed.
+        agent = self.core.agent("spF")
+        self.core.say(agent["address"], "working", "working")
+        pid = self.core.call("terminal.get", terminal=agent["address"])["pid"]
+        transcript = claude_session(self.home, pid, "s-7", "First.")
+        with transcript.open("a") as lines:
+            lines.write(json.dumps({"type": "user", "message": {"content": "Again"}}) + "\n")
+        entry = {"type": "assistant", "message": {"id": "m2", "stop_reason": "end_turn",
+                                                  "content": [{"type": "text", "text": "Second."}]}}
+        self.core.call("terminal.send", terminal=agent["address"], force=True,
+                       text=f"done-then-write {transcript} {json.dumps(entry)}")
+        self.core.until(agent["address"], lambda r: (r.get("status") or {}).get("state") == "done", "done")
+        self.assertEqual(self.run_state("reply", agent["address"]).strip(), "Second.")
+
     def test_a_codex_result_needs_its_one_session_in_the_folder(self):
         agent = self.core.agent("spX", app="codex", cwd=self.repo)
         self.core.say(agent["address"], "working", "working")
