@@ -16,5 +16,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      # herdr-core-voice's tests run against a private herdr-core of their own (tests/private_core.py).
+      - name: Install herdr-core
+        run: |
+          curl -fsSL https://releases.herdr.dev/core/install.sh | HC_VERSION=0.1.18 sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Unit tests
         run: python -m unittest discover -s tests -v

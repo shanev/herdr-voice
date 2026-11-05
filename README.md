@@ -83,6 +83,26 @@ When the agent stopped on a question or a permission prompt, whatever agent it i
 
 It runs on herdr's events (herdr 0.9.3 or later), so nothing new keeps running in the background. Every change Vux shows goes to Vux's agents at once, for an open Vux only (`"push": false`, which needs vux-agent, or Hark's agent from tensor-systems/hark#323 or `hark-auth` 2.0 before the rename): an agent detected or gone, each status change, an agent's pane closed, exited or moved (`pane.agent_detected`, `pane.agent_status_changed`, `pane.closed`, `pane.exited`, `pane.moved`), and a workspace made, closed, renamed or moved (`workspace.created`, `.closed`, `.renamed`, `.moved`, `.reordered`). Title and label changes (an agent's task) aren't reported on their own: herdr sends `pane.updated` for every redraw of a title, and the task is fresh at the next status change. It pushes when an agent goes from working to done or blocked, after the status has held for 20 seconds (Claude can end a reply while a command it started still runs), and only if there's been no keyboard or mouse input for 5 minutes. Agents Hermes started through this skill are skipped, since Hermes reports those itself. The plugin only reads herdr: it never names an agent or labels a pane. Settings, all optional, go in the `.env` file in `herdr plugin config-dir herdr-voice.desk-alerts`: `AWAY_AFTER_MINUTES`, `SETTLE_SECONDS`, and `HERMES_API_URL` (with `HERMES_API_KEY`, else Hermes' key) for an agent to tell besides those in `~/.hermes/.env` and `~/.vux-agent` (or `~/.hark-agent`, from before the rename).
 
+## The Herdr app (herdr-core)
+
+The new Herdr is a desktop app, Herdr, on [herdr-core](https://github.com/herdrdev/herdr-core), the runtime that keeps its terminals running (`hc`). The `herdr-core-voice` skill does all of the above for it: the same requests, the same replies, the same pages in Vux. A computer can have either Herdr or both: install the skill for each one it has.
+
+```
+hermes skills install shanev/herdr-voice/skills/herdr-core-voice --category autonomous-ai-agents
+```
+
+Vux's setup installs it when `hc` is there, on Hermes or vux-agent. Nothing to add to Herdr: the skill reads herdr-core through its socket.
+
+What changes with the app:
+
+- Vux's pages are Herdr's spaces on the computer, named as Herdr names them (the name you gave a space, else its repo or folder; the home folder's is "Home").
+- A new session is started with `hc run` in the repo's space, as a new tab there, or in a new space for the repo. It shows in Herdr's window at once, or when you next open it: the window can be closed.
+- Each agent's row: its name (the name it was started with; an agent you start from Herdr's window has none, and hc can't rename one, so its row shows its address, `t3`, and Hermes calls it by its task), its kind (`Claude`, `Codex`: the agent as it reports itself), its task (its tab's name, else its terminal title) and its state. Its item id is its terminal address.
+- An agent is a terminal that reports its status to herdr-core (Claude Code and Codex do, with no setup). A plain shell isn't one, nor is an agent that reports nothing (pi, cursor-agent), nor a Claude or Codex still on the folder-trust question it asks the first time it opens a folder: that question doesn't reach your phone, and Hermes answers it when it starts the session.
+- A blocked agent's card has its screen, as before. A finished one's has the start of its reply, from Claude Code's session file (found by its process), or Codex's (the one Codex session started in that folder since the agent started; with two, Hermes reads the screen instead).
+- No plugin: the skill's watcher (`scripts/watch.py`, declared as `metadata.vux.watch`) follows herdr-core's events, and vux-agent runs it while the skill is installed. It reports every change to Vux's open stream, and pushes an agent's finish or question while you're away, after 20 seconds settled, as desk alerts do. `AWAY_AFTER_MINUTES` and `SETTLE_SECONDS` in its environment change those. Agents Hermes hands off are skipped, through a label on their terminal (`herdr-core-voice.handed-off`, and `herdr-core-voice.realert` to alert again): the skill writes no other.
+- "Show me that one" runs `herdr-app do agent.focus`, which needs Herdr's window open.
+
 ## Why Hermes runs outside herdr
 
 Hermes' gateway usually runs as a background service, not in a herdr pane. herdr's own skill stops when `HERDR_ENV` isn't set, so it refuses to work from there. This skill controls herdr from outside through its socket. It addresses agents by pane, never by focus, and never attaches, focuses or closes anything it didn't start, except that it switches to an agent when you ask to see it. If both skills are installed, Hermes may load herdr's by name; Vux's instructions point it at this one.
@@ -99,7 +119,11 @@ The `metadata.hark` block in the frontmatter is for [Vux](https://vux.dev): a di
 python3 -m unittest discover -s tests -v
 ```
 
-Stdlib only.
+Stdlib only. herdr-core-voice's tests start a private herdr-core of their own (its own session, socket and state, never yours), so they need `hc` (CI installs it); they're skipped without it. One test drives a real, signed-in Claude Code, and runs only locally, on request:
+
+```
+HC_REAL_CLAUDE=1 python3 -m unittest discover -s tests -p test_core_real_claude.py -v
+```
 
 ## License
 
