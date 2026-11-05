@@ -133,11 +133,11 @@ hc prints JSON when piped; read addresses and statuses from it. `hc <command> --
 4. **Start**, with its prompts-off flag if the user wants prompts off (claude `--dangerously-skip-permissions`, codex `--yolo`, omp `--auto-approve`, grok `--always-approve`, opencode `--auto`, cursor `--force`; others: read `--help` once). Codex always needs `--no-daemon`.
 
    ```bash
-   hc run --bg --no-parent --keep --name <name> --cwd <folder> --label herdr.space=<space> -- <agent> <flags>
+   hc run --bg --no-parent --keep --name <name> --cwd <folder> --label herdr.space=<space> -- env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID <agent> <flags>
    hc wait <name> --timeout 30
    ```
 
-   The label puts it in that space as a new tab, at once if Herdr's window is open, else when it opens. A new space id makes a new space, named after the repo.
+   `env -u` keeps a Claude from taking itself for another Claude's child, if the core was started from one: a child keeps no transcript, so its replies couldn't be read. The label puts it in that space as a new tab, at once if Herdr's window is open, else when it opens. A new space id makes a new space, named after the repo.
 5. **Ready:** when the wait reports `idle`, send the task as in **Send a task**. With no status (`reason: timeout`), read the screen (`hc read <name>`): a first-launch folder-trust question, for the repo or the Vux space's folder, gets yes (Claude: `hc keys <name> down enter`; Codex: `hc keys <name> enter`), then wait again. Tell the user anything else it asks.
 
 Tell the user where it is ("apple-models is up in api", in a new space or not). **Permission prompts:** the first time, check memory for the user's choice; if none, ask once "Should coding sessions run with permission prompts off, so they never stop to ask?" and save the answer.

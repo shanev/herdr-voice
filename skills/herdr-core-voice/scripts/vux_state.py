@@ -284,7 +284,9 @@ def kind_name(app):
 
 def claude_session(terminal, home):
     """Claude Code's session id, from the file it keeps per process (~/.claude/sessions/<pid>.json): the terminal's
-    foreground process, else the one hc started."""
+    foreground process, else the one hc started. A Claude that's another Claude's child session (its environment has
+    CLAUDE_CODE_CHILD_SESSION: a helper an agent started with `hc run`, or any terminal of a core an agent's hc call
+    started) keeps neither that file nor a transcript, so it has no reply to read here: the screen has it."""
     for pid in filter(None, ((terminal.get("foreground") or {}).get("pid"), terminal.get("pid"))):
         try:
             found = json.loads((home / ".claude" / "sessions" / f"{pid}.json").read_text(encoding="utf-8"))

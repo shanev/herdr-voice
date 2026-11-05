@@ -94,7 +94,8 @@ class Installs(unittest.TestCase):
 class Recipes(unittest.TestCase):
     def test_new_sessions_show_in_herdr_with_the_window_closed(self):
         # herdr-app's own commands need its window; a terminal labelled with a space shows there whenever it opens.
-        self.assertIn("hc run --bg --no-parent --keep --name <name> --cwd <folder> --label herdr.space=<space>", TEXT)
+        self.assertIn("hc run --bg --no-parent --keep --name <name> --cwd <folder> --label herdr.space=<space> -- "
+                      "env -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID <agent>", TEXT)
         self.assertNotIn("tab.new", TEXT)
         self.assertNotIn("space.new", TEXT)
         self.assertIn("scripts/vux_state.py space <repo_path>", TEXT)

@@ -25,8 +25,11 @@ TASK = ("Use the AskUserQuestion tool to ask me whether I prefer red or blue, wi
 
 @unittest.skipUnless(os.getenv("HC_REAL_CLAUDE") == "1", "local only: a real, signed-in Claude Code (HC_REAL_CLAUDE=1)")
 class RealClaude(unittest.TestCase):
+    # The core's environment, and so its terminals'.
+    core_env = {}
+
     def setUp(self):
-        self.core = PrivateCore().start()
+        self.core = PrivateCore(**self.core_env).start()
         self.addCleanup(self.core.stop)
         self.repo = Path(tempfile.mkdtemp(prefix="hcv-repo-", dir="/tmp")).resolve()
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
@@ -93,3 +96,36 @@ class RealClaude(unittest.TestCase):
         self.assertEqual((item["state"], item["card"]["kind"]), ("done", "result"))
         # Its reply, from the session file Claude Code keeps for its process.
         self.assertIn("red", item["card"]["text"].lower())
+
+
+class ChildClaude(RealClaude):
+    """A core whose terminals all take themselves for another Claude's child sessions: one an agent's hc call started,
+    from inside Claude Code. Claude Code (2.1.318) then keeps neither ~/.claude/sessions/<pid>.json nor a transcript.
+    A session started the skill's way (SKILL.md's `env -u`) is no one's child: its reply is read from its files."""
+    core_env = {"CLAUDE_CODE_CHILD_SESSION": "1", "CLAUDE_CODE_SESSION_ID": "00000000-0000-4000-8000-000000000000"}
+
+    def finished(self, name, argv):
+        address = self.core.call("terminal.run", argv=argv, cwd=str(self.repo), name=name,
+                                 labels={"herdr.space": "spReal"}, no_parent=True)["address"]
+        self.core.call("terminal.wait", terminal=address, timeout=30)
+        if "trust" in self.core.call("terminal.read", terminal=address, lines=0)["text"]:
+            self.core.call("terminal.keys", terminal=address, keys=["down", "enter"])
+        self.core.until(address, lambda r: (r.get("status") or {}).get("state") == "idle", "idle")
+        self.core.call("terminal.send", terminal=address, text="Reply with just the word pineapple.")
+        self.core.until(address, lambda r: (r.get("status") or {}).get("state") == "done", "its finish")
+        return address
+
+    def test_a_question_its_answer_and_the_finish(self):
+        child = self.finished("child", ["claude"])
+        started = self.finished("started", ["env", "-u", "CLAUDE_CODE_CHILD_SESSION", "-u", "CLAUDE_CODE_SESSION_ID",
+                                             "claude"])
+        items = {i["id"]: i for i in self.state("items", "spReal")["items"]}
+        # The child's reply is only on its screen: a result card without text, and `reply` says to read the screen.
+        self.assertEqual(items[child]["card"]["kind"], "result")
+        self.assertNotIn("text", items[child]["card"])
+        reply = subprocess.run([sys.executable, "scripts/vux_state.py", "reply", child], cwd=SKILL_DIR, env=self.env,
+                               capture_output=True, text=True, timeout=60)
+        self.assertEqual(reply.returncode, 3, reply.stderr)
+        # Started as SKILL.md says: its own session, read from its files.
+        self.assertIn("pineapple", items[started]["card"]["text"].lower())
+        self.assertEqual([s["id"] for s in self.state("sessions")["sessions"]], [started])
