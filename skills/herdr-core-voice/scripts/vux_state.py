@@ -24,9 +24,10 @@ it when it opens). Herdr names a space after its folder, so a name that's no rep
 {"context": {...}}.
 
 items: the agents in a space, or in every space each with its "context", as {"items": [...]}, in item format version 2
-(metadata.vux.items.version). An agent is a terminal in a Herdr space (its `herdr.space` label) whose program has
-reported a status (OSC 7501), as Herdr counts agents: a plain shell isn't one, nor is an agent that never reports
-(pi, cursor-agent) or one still on its first-launch folder-trust dialog (Claude Code and Codex report nothing there).
+(metadata.vux.items.version). An agent is a terminal in a Herdr space (its `herdr.space` label) whose program has a
+status (OSC 7501) now, as Herdr counts agents: a plain shell isn't one, nor is an agent that never reports (pi,
+cursor-agent), one still on its first-launch folder-trust dialog (Claude Code and Codex report nothing there), or one
+that quit back to its shell (it clears its status).
   id     the terminal's address (t7).
   name   its hc name, else its address. hc names a terminal only when it starts (`hc run --name`) and can't rename
          one: a terminal started from Herdr's window has none, and this script never makes one up.
@@ -168,7 +169,7 @@ class World:
         return [self.terminals[a] for a in placed + rest]
 
     def agents(self, space=None):
-        return [t for t in self.ordered() if self.space_of(t) and t.get("reported") and t.get("state") == "live"
+        return [t for t in self.ordered() if t.get("status") and t.get("state") == "live" and self.space_of(t)
                 and (space is None or self.space_of(t) == space)]
 
 

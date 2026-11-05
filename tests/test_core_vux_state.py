@@ -130,6 +130,19 @@ class VuxState(unittest.TestCase):
                 self.assertIsInstance(item[key], kind)
             self.assertEqual(item["context"], "spA")
 
+    def test_an_agent_that_quit_to_its_shell_is_no_agent(self):
+        # Claude Code and Codex clear their status when they exit to the shell Herdr ran them in: the terminal lives
+        # on, a plain shell now, which reported once.
+        agent = self.core.agent("spQ")
+        self.core.say(agent["address"], "working", "working")
+        self.core.say(agent["address"], "done", "done")
+        self.assertEqual(len(self.run_state("items", "spQ")["items"]), 1)
+        self.core.call("terminal.send", terminal=agent["address"], text="clear")
+        record = self.core.until(agent["address"], lambda r: r.get("status") is None, "its status cleared")
+        self.assertTrue(record["reported"])
+        self.assertEqual(self.run_state("items", "spQ")["items"], [])
+        self.assertEqual(self.run_state("space", str(self.core.folder))["busy"], [])
+
     def test_a_title_is_the_task_until_the_tab_is_named(self):
         agent = self.core.agent("spT")
         self.core.say(agent["address"], "title \U000f03e2 Tesla Roadster  physics", "idle")

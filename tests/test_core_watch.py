@@ -166,6 +166,15 @@ class Watch(unittest.TestCase):
         self.core.call("terminal.label", terminal=outside["address"], labels={"herdr.space": "spM"})
         self.assertEqual(self.lines_until(CHANGED), [{"context": "spM", "item": outside["address"], "push": False}, CHANGED])
 
+    def test_an_agent_that_quits_to_its_shell_leaves_vux(self):
+        agent = self.core.agent("spE")
+        self.core.say(agent["address"], "working", "working")
+        self.core.say(agent["address"], "blocked question Still there?", "blocked")
+        self.lines_until({"context": "spE", "item": agent["address"]})
+        # Its status cleared: it's no agent now, and its question is over (it may push, to withdraw it).
+        self.core.call("terminal.send", terminal=agent["address"], text="clear", force=True)
+        self.assertEqual(self.next_line(), {"context": "spE", "item": agent["address"]})
+
     def test_it_ends_with_its_stdin(self):
         # vux-agent's end, however it went (a SIGKILL included), closes the pipe.
         self.watcher.stdin.close()
