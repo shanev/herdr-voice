@@ -175,6 +175,20 @@ class Watch(unittest.TestCase):
         self.core.call("terminal.send", terminal=agent["address"], text="clear", force=True)
         self.assertEqual(self.next_line(), {"context": "spE", "item": agent["address"]})
 
+    def test_a_sub_agent_is_its_ancestors_spaces(self):
+        lead = self.core.agent("spS")
+        self.lines_until(CHANGED)
+        helper = self.core.agent(parent=lead["address"])
+        # In its parent's space, which isn't new.
+        self.assertEqual(self.next_line(), {"context": "spS", "item": lead["address"], "push": False})
+        self.assertEqual(self.next_line(), {"context": "spS", "item": helper["address"], "push": False})
+        self.assertEqual(self.next_line(), {"context": "spS", "item": helper["address"], "push": False})
+        self.core.say(helper["address"], "working", "working")
+        self.core.say(helper["address"], "done", "done")
+        self.assertEqual(self.lines_until({"context": "spS", "item": helper["address"]})[-2:],
+                         [{"context": "spS", "item": helper["address"], "push": False},
+                          {"context": "spS", "item": helper["address"]}])
+
     def test_it_ends_with_its_stdin(self):
         # vux-agent's end, however it went (a SIGKILL included), closes the pipe.
         self.watcher.stdin.close()

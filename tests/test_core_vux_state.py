@@ -143,6 +143,21 @@ class VuxState(unittest.TestCase):
         self.assertEqual(self.run_state("items", "spQ")["items"], [])
         self.assertEqual(self.run_state("space", str(self.core.folder))["busy"], [])
 
+    def test_a_sub_agent_is_in_its_nearest_labelled_ancestors_space(self):
+        # An agent's own helpers (`hc run` from it): no labels, and Herdr shows them in their parent's tab.
+        lead = self.core.agent("spS", name="lead")
+        helper = self.core.agent(parent=lead["address"], name="helper")
+        nested = self.core.agent(parent=helper["address"], name="nested")
+        # Started by a terminal in no space: in none.
+        loose = self.core.agent()
+        self.core.agent(parent=loose["address"], name="stray")
+        self.core.document(space_doc(("spS", "api", str(self.repo), [("", [lead["address"]])])))
+        self.assertEqual([i["name"] for i in self.run_state("items", "spS")["items"]], ["lead", "helper", "nested"])
+        self.assertEqual({(i["name"], i["context"]) for i in self.run_state("items")["items"]},
+                         {("lead", "spS"), ("helper", "spS"), ("nested", "spS")})
+        # No space of their own.
+        self.assertEqual([c["id"] for c in self.run_state("contexts")["contexts"]], ["spS"])
+
     def test_a_title_is_the_task_until_the_tab_is_named(self):
         agent = self.core.agent("spT")
         self.core.say(agent["address"], "title \U000f03e2 Tesla Roadster  physics", "idle")

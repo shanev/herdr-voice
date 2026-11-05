@@ -97,7 +97,8 @@ class Watcher:
         self.out_lock = threading.Lock()
         self.away_after = number("AWAY_AFTER_MINUTES", DEFAULT_AWAY_MINUTES)
         self.settle = number("SETTLE_SECONDS", DEFAULT_SETTLE_SECONDS)
-        # By address: {"status", "space", "labels", "event"} (event: the count of its status changes, for settling).
+        # By address: {"status", "space" (its own label's), "parent", "labels", "event"} (event: the count of its
+        # status changes, for settling).
         self.terminals = {}
 
     def say(self, context=None, item=None, push=False):
@@ -108,14 +109,27 @@ class Watcher:
             self.out.flush()
 
     def spaces(self):
+        """The spaces terminals' own labels name (a sub-agent's is its ancestor's, so it adds none)."""
         return {t["space"] for t in self.terminals.values() if t["space"]}
+
+    def space_of(self, address):
+        """The terminal's space: its own, else its nearest labelled ancestor's (a sub-agent another agent started with
+        `hc run`, which Herdr shows in its parent's tab)."""
+        seen = set()
+        while address in self.terminals and address not in seen:
+            seen.add(address)
+            if self.terminals[address]["space"]:
+                return self.terminals[address]["space"]
+            address = self.terminals[address]["parent"]
+        return None
 
     def track(self, record):
         labels = record.get("labels") or {}
         before = self.terminals.get(record["address"]) or {}
         self.terminals[record["address"]] = {
             "status": (record.get("status") or {}).get("state") if record.get("state") == "live" else None,
-            "space": labels.get(core.SPACE) or None, "labels": labels, "event": before.get("event", 0)}
+            "space": labels.get(core.SPACE) or None, "parent": record.get("parent"), "labels": labels,
+            "event": before.get("event", 0)}
 
     def snapshot(self, terminals):
         self.terminals = {}
@@ -134,16 +148,17 @@ class Watcher:
         spaces = self.spaces()
         if kind in ("created", "restarted"):
             self.track(data)
-            space = self.terminals[address]["space"]
+            space = self.space_of(address)
             if space:
                 self.say(space, address)
                 if space not in spaces:
                     self.say()
         elif kind in ("finished", "removed"):
+            space = self.space_of(address)
             gone = self.terminals.pop(address, None)
-            if gone and gone["space"]:
-                self.say(gone["space"], address, push=gone["status"] == "blocked")
-                if gone["space"] not in self.spaces():
+            if gone and space:
+                self.say(space, address, push=gone["status"] == "blocked")
+                if self.spaces() != spaces:
                     self.say()
         elif kind == "labels":
             self.labels(address, data, spaces)
@@ -158,9 +173,10 @@ class Watcher:
             return
         labels = data.get("labels") or {}
         before, terminal["labels"] = terminal["labels"], labels
-        old, terminal["space"] = terminal["space"], labels.get(core.SPACE) or None
-        if old != terminal["space"]:
-            for space in filter(None, (old, terminal["space"])):
+        old = self.space_of(address)
+        terminal["space"] = labels.get(core.SPACE) or None
+        if old != self.space_of(address):
+            for space in filter(None, (old, self.space_of(address))):
                 self.say(space, address)
             if self.spaces() != spaces:
                 self.say()
@@ -174,9 +190,10 @@ class Watcher:
             return
         previous, terminal["status"] = terminal["status"], status
         terminal["event"] += 1
-        if previous == status or not terminal["space"]:
+        space = self.space_of(address)
+        if previous == status or not space:
             return
-        self.say(terminal["space"], address, push=is_resolved(previous, status))
+        self.say(space, address, push=is_resolved(previous, status))
         if not is_alert(previous, status) or self.handed_off(address, terminal):
             return
         ioreg = subprocess.run(["ioreg", "-c", "IOHIDSystem"], capture_output=True, text=True).stdout \
@@ -201,8 +218,9 @@ class Watcher:
             with self.lock:
                 terminal = self.terminals.get(address)
                 held = terminal is not None and terminal["event"] == event and terminal["status"] == status
-            if held and terminal["space"]:
-                self.say(terminal["space"], address, push=True)
+                space = self.space_of(address)
+            if held and space:
+                self.say(space, address, push=True)
 
         timer = threading.Timer(self.settle, deliver)
         timer.daemon = True

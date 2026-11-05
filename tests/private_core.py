@@ -155,11 +155,13 @@ class PrivateCore:
             lines.close()
             connection.close()
 
-    def agent(self, space=None, app="claude-code", name=None, cwd=None, labels=None):
-        """A fake agent (tests/fake_agent.py) in a space; returns its record once it reports idle."""
+    def agent(self, space=None, app="claude-code", name=None, cwd=None, labels=None, parent=None):
+        """A fake agent (tests/fake_agent.py) in a space, or started by another (`parent`, as an agent's `hc run`
+        does); returns its record once it reports idle."""
         labels = {**({"herdr.space": space} if space else {}), **(labels or {})}
-        made = self.call("terminal.run", argv=[sys.executable, str(FAKE_AGENT), app], labels=labels, no_parent=True,
-                         cwd=str(cwd or self.folder), **({"name": name} if name else {}))
+        made = self.call("terminal.run", argv=[sys.executable, str(FAKE_AGENT), app], labels=labels,
+                         cwd=str(cwd or self.folder), **({"name": name} if name else {}),
+                         **({"parent": parent} if parent else {"no_parent": True}))
         address = made["address"] if "address" in made else made["terminal"]["address"]
         return self.until(address, lambda r: (r.get("status") or {}).get("state") == "idle", "first idle report")
 

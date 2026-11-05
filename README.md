@@ -95,7 +95,7 @@ Vux's setup installs it when `hc` is there, on Hermes or vux-agent. Nothing to a
 
 What changes with the app:
 
-- Vux's pages are Herdr's spaces on the computer, named as Herdr names them (the name you gave a space, else its repo or folder; the home folder's is "Home").
+- Vux's pages are Herdr's spaces on the computer, named as Herdr names them (the name you gave a space, else its repo or folder; the home folder's is "Home"). An agent's own helpers (started with `hc run` from it) are in its space, as Herdr shows them in its tab.
 - A new session is started with `hc run` in the repo's space, as a new tab there, or in a new space for the repo. It shows in Herdr's window at once, or when you next open it: the window can be closed.
 - Each agent's row: its name (the name it was started with; an agent you start from Herdr's window has none, and hc can't rename one, so its row shows its address, `t3`, and Hermes calls it by its task), its kind (`Claude`, `Codex`: the agent as it reports itself), its task (its tab's name, else its terminal title) and its state. Its item id is its terminal address.
 - An agent is a terminal that has a status in herdr-core, reported by its program (Claude Code and Codex do, with no setup). A plain shell isn't one, nor an agent that quit back to its shell (it clears its status), nor one that reports nothing (pi, cursor-agent), nor a Claude or Codex still on the folder-trust question it asks the first time it opens a folder: that question doesn't reach your phone, and Hermes answers it when it starts the session.

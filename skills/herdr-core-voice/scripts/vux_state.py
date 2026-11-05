@@ -27,7 +27,9 @@ items: the agents in a space, or in every space each with its "context", as {"it
 (metadata.vux.items.version). An agent is a terminal in a Herdr space (its `herdr.space` label) whose program has a
 status (OSC 7501) now, as Herdr counts agents: a plain shell isn't one, nor is an agent that never reports (pi,
 cursor-agent), one still on its first-launch folder-trust dialog (Claude Code and Codex report nothing there), or one
-that quit back to its shell (it clears its status).
+that quit back to its shell (it clears its status). A terminal is in the space its `herdr.space` label names; a
+sub-agent another agent started with `hc run`, unlabelled, is in its nearest labelled ancestor's, as Herdr shows it in
+its parent's tab.
   id     the terminal's address (t7).
   name   its hc name, else its address. hc names a terminal only when it starts (`hc run --name`) and can't rename
          one: a terminal started from Herdr's window has none, and this script never makes one up.
@@ -140,8 +142,19 @@ class World:
                 for address in terminals_in(tab.get("root")):
                     self.places.setdefault(address, (space, tab))
 
-    def space_of(self, terminal):
+    def own_space(self, terminal):
+        """The space the terminal's own label names: Herdr gives it a pane there."""
         return (terminal.get("labels") or {}).get(core.SPACE) or None
+
+    def space_of(self, terminal):
+        """Its own space, else its nearest labelled ancestor's (a sub-agent's: Herdr keeps it in its parent's tab)."""
+        seen = set()
+        while terminal is not None and terminal["address"] not in seen:
+            seen.add(terminal["address"])
+            if self.own_space(terminal):
+                return self.own_space(terminal)
+            terminal = self.terminals.get(terminal.get("parent") or "")
+        return None
 
     def spaces(self):
         """(id, name) of every space: the document's, then those only terminals' labels name yet."""
@@ -150,7 +163,7 @@ class World:
             known.append((space["id"], self.space_name(space["id"], space)))
         ids = {space for space, _ in known}
         for terminal in self.ordered():
-            space = self.space_of(terminal)
+            space = self.own_space(terminal)
             if space and space not in ids:
                 ids.add(space)
                 known.append((space, self.space_name(space, None)))
@@ -159,7 +172,7 @@ class World:
     def space_name(self, space, saved):
         if saved and saved.get("name"):
             return saved["name"]
-        first = next((t for t in self.ordered() if self.space_of(t) == space), None)
+        first = next((t for t in self.ordered() if self.own_space(t) == space), None)
         return folder_name(live_folder(first) if first else (saved or {}).get("folder")) or f"Space {space}"
 
     def ordered(self):
@@ -217,7 +230,7 @@ def space(repo):
 def folder(space):
     with core.Core() as connection:
         world = World(connection)
-    first = next((t for t in world.ordered() if world.space_of(t) == space), None)
+    first = next((t for t in world.ordered() if world.own_space(t) == space), None)
     saved = next((s for s in world.document.get("spaces") or [] if s.get("id") == space), None)
     found = live_folder(first) if first else (saved or {}).get("folder")
     if not found:
