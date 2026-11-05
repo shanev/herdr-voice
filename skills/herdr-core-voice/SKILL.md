@@ -39,7 +39,7 @@ metadata:
     watch:
       - python3
       - scripts/watch.py
-    routing: "For the Herdr app (herdr-core, hc) and for starting, checking, prompting or stopping coding agents (Claude Code, Codex, any) in it, load herdr-core-voice, not the claude-code or codex skills or tmux; classic herdr's workspaces are herdr-voice's. Don't check HERDR_ENV."
+    routing: "The Herdr app (herdr-core, hc, spaces) and its coding agents (Claude Code, Codex, any): load herdr-core-voice, not claude-code, codex or tmux; classic herdr's workspaces are herdr-voice's. Both installed, neither named: the skill the page's scope names, else the one with the repo, else ask once."
   hark:
     voice: true
     title: Herdr
@@ -77,7 +77,7 @@ metadata:
     watch:
       - python3
       - scripts/watch.py
-    routing: "For the Herdr app (herdr-core, hc) and for starting, checking, prompting or stopping coding agents (Claude Code, Codex, any) in it, load herdr-core-voice, not the claude-code or codex skills or tmux; classic herdr's workspaces are herdr-voice's. Don't check HERDR_ENV."
+    routing: "The Herdr app (herdr-core, hc, spaces) and its coding agents (Claude Code, Codex, any): load herdr-core-voice, not claude-code, codex or tmux; classic herdr's workspaces are herdr-voice's. Both installed, neither named: the skill the page's scope names, else the one with the repo, else ask once."
 ---
 
 # Herdr app coding sessions, by voice

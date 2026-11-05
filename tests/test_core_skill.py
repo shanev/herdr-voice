@@ -48,6 +48,12 @@ class Frontmatter(unittest.TestCase):
         # Both skills may be installed on a computer with both Herdrs: each names its own and the other's.
         self.assertIn("herdr-core-voice", vux["routing"])
         self.assertIn("herdr-voice's", vux["routing"])
+        self.assertTrue(vux["routing"].startswith("The Herdr app"))
+        # The same tie-break as herdr-voice's, word for word, so the two never disagree.
+        tie = "Both installed, neither named: the skill the page's scope names, else the one with the repo, else ask once."
+        self.assertIn(tie, vux["routing"])
+        classic = (ROOT / "skills" / "herdr-voice" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn(tie, re.search(r'routing: "(.*)"', classic).group(1))
 
     def test_declares_its_spaces_agents_and_watcher(self):
         vux = frontmatter()["metadata"]["vux"]

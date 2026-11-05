@@ -36,7 +36,7 @@ metadata:
       push:
         - waiting
         - done
-    routing: "For Herdr, and for starting, checking, prompting or stopping any coding agent session (Claude Code, Codex, omp or any agent Herdr supports), load herdr-voice, not the herdr, claude-code or codex skills and not tmux. You run outside Herdr and that's supported: don't check HERDR_ENV."
+    routing: "Classic herdr (CLI/TUI, workspaces) and its coding agents: load herdr-voice, not the herdr, claude-code or codex skills or tmux; Herdr app spaces are herdr-core-voice's. Both installed, neither named: the skill the page's scope names, else the one with the repo, else ask once. Ignore HERDR_ENV."
 ---
 
 # Herdr coding sessions, by voice

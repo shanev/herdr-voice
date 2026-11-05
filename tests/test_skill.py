@@ -76,6 +76,12 @@ class Frontmatter(unittest.TestCase):
         self.assertFalse([p for p in vux["phrases"] if "hark" in p.lower()])
         self.assertLessEqual(len(vux["routing"]), 300)
         self.assertIn("herdr-voice", vux["routing"])
+        # It claims classic herdr only: the Herdr app is herdr-core-voice's, and with both installed a request that
+        # names neither goes by the page's scope, then the repo, then one question.
+        self.assertTrue(vux["routing"].startswith("Classic herdr"))
+        self.assertIn("herdr-core-voice's", vux["routing"])
+        self.assertIn("Both installed, neither named: the skill the page's scope names, else the one with the repo, "
+                      "else ask once.", vux["routing"])
 
 
     def test_declares_its_workspaces_and_agents_to_vux(self):
