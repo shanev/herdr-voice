@@ -12,14 +12,35 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       # herdr-core-voice's tests run against a private herdr-core of their own (tests/private_core.py).
+      # The binary is downloaded directly and its sha256 checked against this
+      # file, so a compromised release server can't swap it. The installer
+      # script (curl … | sh) only gets its checksums from that same server, so
+      # it verifies nothing CI doesn't already pin here — CI runs no code from
+      # releases.herdr.dev beyond the tarball itself. Bump HC_VERSION together
+      # with the hashes from the vendor manifest
+      # (https://releases.herdr.dev/core/<version>/manifest.json), after
+      # reviewing the release notes.
       - name: Install herdr-core
+        env:
+          HC_VERSION: "0.1.18"
+          HC_SHA256_X86_64: "5b2f97cb4b2a9d7a6b2cc5942628203ed9fbb7cc0c2b4b09ad8a6f5648e246b7"
+          HC_SHA256_AARCH64: "cf33393cf950bb763734dc3e16610ab9daf8492391a4ef0de56026cd7f752853"
         run: |
-          curl -fsSL https://releases.herdr.dev/core/install.sh | HC_VERSION=0.1.18 sh
+          case "$(uname -m)" in
+            x86_64) arch=x86_64; want=$HC_SHA256_X86_64 ;;
+            aarch64) arch=aarch64; want=$HC_SHA256_AARCH64 ;;
+            *) echo "::error::no pinned herdr-core build for $(uname -m)" >&2; exit 1 ;;
+          esac
+          curl -fsSL "https://releases.herdr.dev/core/$HC_VERSION/herdr-core-linux-$arch.tar.gz" -o hc.tar.gz
+          echo "$want  hc.tar.gz" | sha256sum --check --status
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf hc.tar.gz -C "$HOME/.local/bin" herdr-core
+          ln -sf herdr-core "$HOME/.local/bin/hc"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Unit tests
         run: python -m unittest discover -s tests -v
